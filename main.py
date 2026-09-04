@@ -33,8 +33,9 @@ class Form(StatesGroup):
 
 
 class Withdraw(StatesGroup):
-    amount = State()
-    details = State()
+    price = State()
+    skin = State()
+    screenshot = State()
 
 
 class Promo(StatesGroup):
@@ -62,10 +63,11 @@ def format_wd(wd):
     user = db.get_user(wd["user_id"])
     name = user["first_name"] if user else "?"
     username = f"@{user['username']}" if user and user["username"] else f"ID {wd['user_id']}"
+    cur = db.get_setting("currency", config.CURRENCY)
     return (
         f"Заявка на вывод №{wd['id']}\n"
-        f"Сумма: {wd['amount']} {db.get_setting('currency', config.CURRENCY)}\n"
-        f"Реквизиты: {wd['details']}\n"
+        f"Цена: {wd['amount']} {cur}\n"
+        f"Скин / паттерн: {wd.get('skin') or '—'}\n"
         f"Пользователь: {name} ({username})\n"
         f"Дата: {wd['created_at']}"
     )
@@ -242,6 +244,108 @@ async def cmd_set_currency(message: Message, command: CommandObject):
     await message.answer(f"Валюта установлена: {command.args.strip()}")
 
 
+@router.message(Command("addbal"))
+async def cmd_addbal(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
+        await message.answer("Использование: /addbal <id пользователя> <количество G>")
+        return
+    user = db.get_user(int(args[0]))
+    if not user:
+        await message.answer("Пользователь не найден.")
+        return
+    db.add_balance(int(args[0]), int(args[1]))
+    cur = db.get_setting("currency", config.CURRENCY)
+    await message.answer(
+        f"Начислено +{args[1]} {cur} пользователю {user['first_name']} (ID {args[0]})."
+    )
+
+
+@router.message(Command("subbal"))
+async def cmd_subbal(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
+        await message.answer("Использование: /subbal <id пользователя> <количество G>")
+        return
+    user = db.get_user(int(args[0]))
+    if not user:
+        await message.answer("Пользователь не найден.")
+        return
+    db.spend_balance(int(args[0]), int(args[1]))
+    cur = db.get_setting("currency", config.CURRENCY)
+    await message.answer(
+        f"Списано −{args[1]} {cur} у пользователя {user['first_name']} (ID {args[0]})."
+    )
+
+
+@router.message(Command("withdrawals"))
+async def cmd_withdrawals(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    status_map = {
+        "pending": "pending",
+        "paid": "paid",
+        "rejected": "rejected",
+    }
+    status = None
+    if command.args:
+        status = status_map.get(command.args.strip().lower())
+        if status is None:
+            await message.answer(
+                "Использование: /withdrawals [pending | paid | rejected]"
+            )
+            return
+    rows = db.list_withdrawals(status=status, limit=15)
+    if not rows:
+        await message.answer("Заявок на вывод не найдено.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    label = {"pending": "⏳ В ОЖИДАНИИ", "paid": "✅ ВЫПЛАЧЕН", "rejected": "❌ ОТКЛОНЁН"}
+    lines = []
+    for r in rows:
+        user = db.get_user(r["user_id"])
+        uname = f"@{user['username']}" if user and user["username"] else f"ID {r['user_id']}"
+        lines.append(
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {r['amount']} {cur}\n"
+            f"    🎮 {r.get('skin') or '—'} · {uname}\n"
+            f"    🕒 {r['created_at'][:16]}"
+        )
+    await message.answer("💸 Выводы:\n\n" + "\n\n".join(lines))
+
+
+@router.message(Command("withdraw"))
+async def cmd_withdraw(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args or not command.args.isdigit():
+        await message.answer("Использование: /withdraw <номер заявки>")
+        return
+    wd = db.get_withdrawal(int(command.args))
+    if not wd:
+        await message.answer("Заявка не найдена.")
+        return
+    wd_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton("✅ Выплатить", callback_data=f"wd_approve:{wd['id']}"),
+                InlineKeyboardButton("❌ Отклонить", callback_data=f"wd_reject:{wd['id']}"),
+            ]
+        ]
+    )
+    if wd.get("screenshot"):
+        await message.answer_photo(
+            photo=wd["screenshot"],
+            caption=format_wd(wd),
+            reply_markup=wd_kb,
+        )
+    else:
+        await message.answer(format_wd(wd), reply_markup=wd_kb)
+
+
 @router.callback_query(F.data == "start_form")
 async def cq_start_form(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
@@ -315,14 +419,16 @@ async def cq_start_withdraw(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     min_wd = db.get_setting("min_withdraw", config.DEFAULT_MIN_WITHDRAW)
     cur = db.get_setting("currency", config.CURRENCY)
-    await state.set_state(Withdraw.amount)
+    await state.set_state(Withdraw.price)
     await cb.message.answer(
-        f"Сколько {cur} вы хотите вывести?\nМинимальная сумма: {min_wd} {cur}."
+        f"Вывод средств.\n"
+        f"1️⃣ Укажите цену скина в {cur}.\n"
+        f"Минимальная сумма: {min_wd} {cur}."
     )
 
 
-@router.message(Withdraw.amount, F.text)
-async def wd_amount(message: Message, state: FSMContext):
+@router.message(Withdraw.price, F.text)
+async def wd_price(message: Message, state: FSMContext):
     try:
         amount = float(message.text.replace(",", "."))
     except ValueError:
@@ -330,23 +436,36 @@ async def wd_amount(message: Message, state: FSMContext):
         return
     min_wd = db.get_setting("min_withdraw", config.DEFAULT_MIN_WITHDRAW)
     if amount < min_wd:
-        await message.answer(f"Минимальная сумма вывода: {min_wd}. Введите сумму ещё раз.")
+        await message.answer(f"Минимальная сумма вывода: {min_wd}.")
         return
     user = db.get_user(message.from_user.id)
     if user["balance"] < amount:
-        await message.answer("На балансе недостаточно средств.")
+        await message.answer("На балансе недостаточно голды.")
         return
     await state.update_data(amount=amount)
-    await state.set_state(Withdraw.details)
-    await message.answer("Укажите реквизиты для вывода (номер карты / кошелька):")
+    await state.set_state(Withdraw.skin)
+    await message.answer("2️⃣ Введите название скина / паттерна:")
 
 
-@router.message(Withdraw.details, F.text)
-async def wd_details(message: Message, state: FSMContext):
-    data = await state.update_data(details=message.text)
+@router.message(Withdraw.skin, F.text)
+async def wd_skin(message: Message, state: FSMContext):
+    await state.update_data(skin=message.text)
+    await state.set_state(Withdraw.screenshot)
+    await message.answer("3️⃣ Отправьте скриншот скина (фото):")
+
+
+@router.message(Withdraw.screenshot, F.photo)
+async def wd_screenshot(message: Message, state: FSMContext, album=None):
+    data = await state.update_data(screenshot=message.photo[-1].file_id)
     await state.clear()
 
-    wd_id = db.add_withdrawal(message.from_user.id, data["amount"], data["details"])
+    wd_id = db.add_withdrawal(
+        message.from_user.id,
+        data["amount"],
+        "",
+        skin=data["skin"],
+        screenshot=data["screenshot"],
+    )
     wd = db.get_withdrawal(wd_id)
 
     wd_kb = InlineKeyboardMarkup(
@@ -357,10 +476,21 @@ async def wd_details(message: Message, state: FSMContext):
             ]
         ]
     )
-    await notify_admin(format_wd(wd), wd_kb)
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_photo(
+                admin_id,
+                photo=data["screenshot"],
+                caption=format_wd(wd),
+                reply_markup=wd_kb,
+            )
+        except Exception:
+            logging.exception("Admin notify failed for %s", admin_id)
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
-        f"✅ Заявка на вывод {data['amount']} {cur} отправлена!\n"
+        f"✅ Заявка на вывод №{wd_id} отправлена!\n"
+        f"Цена: {data['amount']} {cur}\n"
+        f"Скин: {data['skin']}\n"
         "Ожидайте, мы выплатим вам в ближайшее время.",
         reply_markup=main_menu(),
     )
@@ -399,24 +529,34 @@ async def cq_wd_action(cb: CallbackQuery):
         await cb.answer("Заявка не найдена", show_alert=True)
         return
 
+    chat_id = cb.message.chat.id
+    msg_id = cb.message.message_id
+
     if action == "wd_approve":
         if not db.spend_balance(wd["user_id"], wd["amount"]):
             await cb.answer("Недостаточно средств у пользователя", show_alert=True)
             return
         db.set_withdrawal_status(int(wd_id), "paid")
-        await cb.message.edit_text(format_wd(wd) + "\n\nСтатус: ✅ ВЫПЛАЧЕН")
+        caption = format_wd(wd) + "\n\nСтатус: ✅ ВЫПЛАЧЕН"
+        try:
+            await bot.edit_message_caption(chat_id, msg_id, caption=caption)
+        except Exception:
+            await cb.message.edit_text(caption)
         cur = db.get_setting("currency", config.CURRENCY)
         await bot.send_message(
             wd["user_id"],
-            f"💰 Вывод {wd['amount']} {cur} одобрен и выплачен!\n"
-            f"Реквизиты: {wd['details']}",
+            f"💰 Ваш вывод №{wd_id} ({wd['amount']} {cur}) одобрен и выплачен!",
         )
     else:
         db.set_withdrawal_status(int(wd_id), "rejected")
-        await cb.message.edit_text(format_wd(wd) + "\n\nСтатус: ❌ ОТКЛОНЁН")
+        caption = format_wd(wd) + "\n\nСтатус: ❌ ОТКЛОНЁН"
+        try:
+            await bot.edit_message_caption(chat_id, msg_id, caption=caption)
+        except Exception:
+            await cb.message.edit_text(caption)
         await bot.send_message(
             wd["user_id"],
-            f"❌ Ваш вывод {wd['amount']} отклонён. Свяжитесь с нами для уточнения.",
+            f"❌ Ваш вывод №{wd_id} отклонён. Свяжитесь с нами для уточнения.",
         )
     await cb.answer()
 

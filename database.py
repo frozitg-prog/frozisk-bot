@@ -50,6 +50,11 @@ def init():
         )
         """
     )
+    cols = [row[1] for row in c.execute("PRAGMA table_info(withdrawals)").fetchall()]
+    if "skin" not in cols:
+        c.execute("ALTER TABLE withdrawals ADD COLUMN skin TEXT")
+    if "screenshot" not in cols:
+        c.execute("ALTER TABLE withdrawals ADD COLUMN screenshot TEXT")
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS settings (
@@ -144,6 +149,16 @@ def spend_balance(user_id, amount):
     return cur.rowcount > 0
 
 
+def set_balance(user_id, amount):
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET balance = ? WHERE id = ?",
+        (max(float(amount), 0), user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def add_request(user_id, name, phone, comment):
     conn = connect()
     cur = conn.execute(
@@ -224,12 +239,12 @@ def list_codes(limit=20):
     return rows
 
 
-def add_withdrawal(user_id, amount, details):
+def add_withdrawal(user_id, amount, details, skin=None, screenshot=None):
     conn = connect()
     cur = conn.execute(
-        "INSERT INTO withdrawals (user_id, amount, details, created_at) "
-        "VALUES (?, ?, ?, ?)",
-        (user_id, amount, details, datetime.now().isoformat()),
+        "INSERT INTO withdrawals (user_id, amount, details, skin, screenshot, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, amount, details, skin, screenshot, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -248,6 +263,21 @@ def set_withdrawal_status(wd_id, status):
     conn.execute("UPDATE withdrawals SET status = ? WHERE id = ?", (status, wd_id))
     conn.commit()
     conn.close()
+
+
+def list_withdrawals(status=None, limit=15):
+    conn = connect()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM withdrawals WHERE status = ? ORDER BY id DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM withdrawals ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    conn.close()
+    return rows
 
 
 def stats():
