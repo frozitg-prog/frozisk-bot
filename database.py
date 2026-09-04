@@ -1,0 +1,201 @@
+import sqlite3
+from datetime import datetime
+
+import config
+
+
+def connect():
+    conn = sqlite3.connect(config.DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init():
+    conn = connect()
+    c = conn.cursor()
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            ref_id INTEGER,
+            balance REAL DEFAULT 0,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT,
+            phone TEXT,
+            comment TEXT,
+            status TEXT DEFAULT 'new',
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            amount REAL,
+            details TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_setting(key, value):
+    conn = connect()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_setting(key, default=None):
+    conn = connect()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    if row is None:
+        return default
+    try:
+        return int(row["value"])
+    except ValueError:
+        return row["value"]
+
+
+def add_user(user_id, username, first_name, ref_id=None):
+    conn = connect()
+    row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+    is_new = row is None
+    if is_new:
+        conn.execute(
+            "INSERT INTO users (id, username, first_name, ref_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, username, first_name, ref_id, datetime.now().isoformat()),
+        )
+        conn.commit()
+    else:
+        if username is not None:
+            conn.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
+            conn.commit()
+    conn.close()
+    return is_new
+
+
+def get_user(user_id):
+    conn = connect()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def add_balance(user_id, amount):
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET balance = balance + ? WHERE id = ?",
+        (amount, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def spend_balance(user_id, amount):
+    conn = connect()
+    cur = conn.execute(
+        "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+        (amount, user_id, amount),
+    )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def add_request(user_id, name, phone, comment):
+    conn = connect()
+    cur = conn.execute(
+        "INSERT INTO requests (user_id, name, phone, comment, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, name, phone, comment, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def get_request(req_id):
+    conn = connect()
+    row = conn.execute("SELECT * FROM requests WHERE id = ?", (req_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def set_request_status(req_id, status):
+    conn = connect()
+    conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, req_id))
+    conn.commit()
+    conn.close()
+
+
+def add_withdrawal(user_id, amount, details):
+    conn = connect()
+    cur = conn.execute(
+        "INSERT INTO withdrawals (user_id, amount, details, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (user_id, amount, details, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def get_withdrawal(wd_id):
+    conn = connect()
+    row = conn.execute("SELECT * FROM withdrawals WHERE id = ?", (wd_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def set_withdrawal_status(wd_id, status):
+    conn = connect()
+    conn.execute("UPDATE withdrawals SET status = ? WHERE id = ?", (status, wd_id))
+    conn.commit()
+    conn.close()
+
+
+def stats():
+    conn = connect()
+    users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    new_requests = conn.execute("SELECT COUNT(*) FROM requests WHERE status = 'new'").fetchone()[0]
+    all_requests = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+    pending_wds = conn.execute(
+        "SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'"
+    ).fetchone()[0]
+    conn.close()
+    return {
+        "users": users,
+        "new_requests": new_requests,
+        "all_requests": all_requests,
+        "pending_wds": pending_wds,
+    }
