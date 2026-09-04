@@ -155,6 +155,46 @@ async def cmd_set_form(message: Message, command: CommandObject):
     await message.answer("Награда за заявку обновлена.")
 
 
+@router.message(Command("requests"))
+async def cmd_requests(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    status_map = {
+        "new": "new",
+        "approved": "approved",
+        "rejected": "rejected",
+    }
+    status = None
+    if command.args:
+        status = status_map.get(command.args.strip().lower())
+        if status is None:
+            await message.answer(
+                "Использование: /requests [new | approved | rejected]\n"
+                "Без параметра — все заявки."
+            )
+            return
+    rows = db.list_requests(status=status, limit=15)
+    if not rows:
+        await message.answer("Заявок не найдено.")
+        return
+    label = {
+        "new": "🆕 НОВАЯ",
+        "approved": "✅ ПРИНЯТА",
+        "rejected": "❌ ОТКЛОНЕНА",
+    }
+    lines = []
+    for r in rows:
+        user = db.get_user(r["user_id"])
+        uname = f"@{user['username']}" if user and user["username"] else f"ID {r['user_id']}"
+        lines.append(
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {uname}\n"
+            f"    👤 {r['name']} · ☎️ {r['phone']}\n"
+            f"    💬 {r['comment'][:80]}\n"
+            f"    🕒 {r['created_at'][:16]}"
+        )
+    await message.answer("📋 Заявки:\n\n" + "\n\n".join(lines))
+
+
 @router.callback_query(F.data == "start_form")
 async def cq_start_form(cb: CallbackQuery, state: FSMContext):
     await cb.answer()

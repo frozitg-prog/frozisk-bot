@@ -158,6 +158,21 @@ def set_request_status(req_id, status):
     conn.close()
 
 
+def list_requests(status=None, limit=10):
+    conn = connect()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM requests WHERE status = ? ORDER BY id DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    conn.close()
+    return rows
+
+
 def add_withdrawal(user_id, amount, details):
     conn = connect()
     cur = conn.execute(
