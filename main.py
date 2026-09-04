@@ -37,6 +37,10 @@ class Withdraw(StatesGroup):
     details = State()
 
 
+class Promo(StatesGroup):
+    code = State()
+
+
 def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -45,6 +49,7 @@ def main_menu():
                 InlineKeyboardButton(text="👛 Мой баланс", callback_data="balance"),
                 InlineKeyboardButton(text="💸 Вывести", callback_data="start_withdraw"),
             ],
+            [InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo")],
         ]
     )
 
@@ -193,6 +198,48 @@ async def cmd_requests(message: Message, command: CommandObject):
             f"    🕒 {r['created_at'][:16]}"
         )
     await message.answer("📋 Заявки:\n\n" + "\n\n".join(lines))
+
+
+@router.message(Command("add_code"))
+async def cmd_add_code(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if len(args) != 2 or not args[1].isdigit():
+        await message.answer("Использование: /add_code <КОД> <количество голды>")
+        return
+    code = args[0].upper()
+    amount = int(args[1])
+    db.add_code(code, amount)
+    cur = db.get_setting("currency", config.CURRENCY)
+    await message.answer(f"Промокод {code} создан на {amount} {cur}.")
+
+
+@router.message(Command("codes"))
+async def cmd_codes(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    rows = db.list_codes(limit=20)
+    if not rows:
+        await message.answer("Промокодов нет. Создайте: /add_code <КОД> <голда>")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    lines = []
+    for r in rows:
+        state = "✅ использован (x" + str(r["used_by"]) + ")" if r["used"] else "🆕 активен"
+        lines.append(f"{r['code']} — {r['amount']} {cur} — {state}")
+    await message.answer("🎁 Промокоды:\n" + "\n".join(lines))
+
+
+@router.message(Command("set_currency"))
+async def cmd_set_currency(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args:
+        await message.answer("Использование: /set_currency <название>")
+        return
+    db.set_setting("currency", command.args.strip())
+    await message.answer(f"Валюта установлена: {command.args.strip()}")
 
 
 @router.callback_query(F.data == "start_form")
@@ -372,6 +419,43 @@ async def cq_wd_action(cb: CallbackQuery):
             f"❌ Ваш вывод {wd['amount']} отклонён. Свяжитесь с нами для уточнения.",
         )
     await cb.answer()
+
+
+async def activate_promo(user_id, code_text):
+    code = code_text.strip().upper()
+    cur = db.get_setting("currency", config.CURRENCY)
+    pc = db.get_code(code)
+    if not pc or pc["used"]:
+        return None, f"Промокод {code} не найден или уже использован."
+    if db.use_code(code, user_id):
+        db.add_balance(user_id, pc["amount"])
+        return pc, f"🎉 Промокод {code} активирован!\nНачислено: +{pc['amount']} {cur} на баланс."
+    return None, f"Промокод {code} не найден или уже использован."
+
+
+@router.callback_query(F.data == "start_promo")
+async def cq_start_promo(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.set_state(Promo.code)
+    await cb.message.answer("Введите промокод:")
+
+
+@router.message(Command("code"))
+async def cmd_code(message: Message, command: CommandObject, state: FSMContext):
+    if command.args:
+        await state.clear()
+        pc, text = await activate_promo(message.from_user.id, command.args)
+        await message.answer(text)
+        return
+    await state.set_state(Promo.code)
+    await message.answer("Введите промокод:")
+
+
+@router.message(Promo.code, F.text)
+async def promo_code(message: Message, state: FSMContext):
+    await state.clear()
+    pc, text = await activate_promo(message.from_user.id, message.text)
+    await message.answer(text)
 
 
 async def health(request):

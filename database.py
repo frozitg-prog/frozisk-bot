@@ -58,6 +58,18 @@ def init():
         )
         """
     )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS promocodes (
+            code TEXT PRIMARY KEY,
+            amount REAL,
+            used INTEGER DEFAULT 0,
+            used_by INTEGER,
+            used_at TEXT,
+            created_at TEXT
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -169,6 +181,45 @@ def list_requests(status=None, limit=10):
         rows = conn.execute(
             "SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
+    conn.close()
+    return rows
+
+
+def add_code(code, amount):
+    conn = connect()
+    conn.execute(
+        "INSERT OR IGNORE INTO promocodes (code, amount, created_at) VALUES (?, ?, ?)",
+        (code, amount, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_code(code):
+    conn = connect()
+    row = conn.execute("SELECT * FROM promocodes WHERE code = ?", (code,)).fetchone()
+    conn.close()
+    return row
+
+
+def use_code(code, user_id):
+    conn = connect()
+    cur = conn.execute(
+        "UPDATE promocodes SET used = 1, used_by = ?, used_at = ? "
+        "WHERE code = ? AND used = 0",
+        (user_id, datetime.now().isoformat(), code),
+    )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def list_codes(limit=20):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM promocodes ORDER BY created_at DESC, code LIMIT ?",
+        (limit,),
+    ).fetchall()
     conn.close()
     return rows
 

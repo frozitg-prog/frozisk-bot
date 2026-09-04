@@ -9,7 +9,7 @@ ADMIN_IDS = [
     if x.strip()
 ]
 
-CURRENCY = os.getenv("CURRENCY", "₽")
+CURRENCY = os.getenv("CURRENCY", "G")
 
 DEFAULT_REWARD_JOIN = 10
 DEFAULT_REWARD_FORM = 50
