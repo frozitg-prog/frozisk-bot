@@ -792,14 +792,9 @@ async def cq_wd_action(cb: CallbackQuery):
                     ]
                 ]
             )
-            try:
-                await bot.edit_message_reply_markup(
-                    chat_id, msg_id, reply_markup=choose_kb
-                )
-            except Exception:
-                pass
             await cb.message.answer(
-                f"Вывод №{wd_id}: выберите вариант отклонения."
+                f"Вывод №{wd_id}: выберите вариант отклонения.",
+                reply_markup=choose_kb,
             )
             return
         elif action == "wd_rejkeep":
