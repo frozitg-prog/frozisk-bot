@@ -26,12 +26,6 @@ router = Router()
 bot = None
 
 
-class Form(StatesGroup):
-    name = State()
-    phone = State()
-    comment = State()
-
-
 class Withdraw(StatesGroup):
     price = State()
     skin = State()
@@ -79,27 +73,6 @@ def format_wd(wd):
     )
 
 
-def format_request(req, reply_kb=False):
-    user = db.get_user(req["user_id"])
-    name = user["first_name"] if user else "?"
-    username = f"@{user['username']}" if user and user["username"] else f"ID {req['user_id']}"
-    return (
-        f"Заявка №{req['id']}\n"
-        f"Имя: {req['name']}\n"
-        f"Телефон: {req['phone']}\n"
-        f"Комментарий: {req['comment']}\n"
-        f"Пользователь: {name} ({username})"
-    )
-
-
-async def notify_admin(text, reply_markup=None):
-    for admin_id in config.ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, text, reply_markup=reply_markup)
-        except Exception:
-            logging.exception("Admin notify failed for %s", admin_id)
-
-
 @router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject):
     user = message.from_user
@@ -132,7 +105,7 @@ async def cmd_start(message: Message, command: CommandObject):
 
     await message.answer(
         f"Привет, {user.first_name}!\n"
-        "Оставляйте заявки, зарабатывайте валюту за приглашённых и выводите её."
+        "Зарабатывайте голду за приглашённых, выполняйте задания и выводите её."
         f"{bonus}",
         reply_markup=main_menu(),
     )
@@ -146,11 +119,8 @@ async def cmd_stats(message: Message):
     await message.answer(
         f"📊 Статистика\n"
         f"Пользователей: {s['users']}\n"
-        f"Заявок всего: {s['all_requests']} (новых: {s['new_requests']})\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
         f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} "
-        f"{db.get_setting('currency', config.CURRENCY)}\n"
-        f"Награда за заявку: {db.get_setting('reward_form', config.DEFAULT_REWARD_FORM)} "
         f"{db.get_setting('currency', config.CURRENCY)}\n"
         f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} "
         f"{db.get_setting('currency', config.CURRENCY)}"
@@ -166,57 +136,6 @@ async def cmd_set_join(message: Message, command: CommandObject):
         return
     db.set_setting("reward_join", int(command.args))
     await message.answer("Награда за вступление обновлена.")
-
-
-@router.message(Command("set_form"))
-async def cmd_set_form(message: Message, command: CommandObject):
-    if not is_admin(message.from_user.id):
-        return
-    if not command.args or not command.args.isdigit():
-        await message.answer("Использование: /set_form <сумма>")
-        return
-    db.set_setting("reward_form", int(command.args))
-    await message.answer("Награда за заявку обновлена.")
-
-
-@router.message(Command("requests"))
-async def cmd_requests(message: Message, command: CommandObject):
-    if not is_admin(message.from_user.id):
-        return
-    status_map = {
-        "new": "new",
-        "approved": "approved",
-        "rejected": "rejected",
-    }
-    status = None
-    if command.args:
-        status = status_map.get(command.args.strip().lower())
-        if status is None:
-            await message.answer(
-                "Использование: /requests [new | approved | rejected]\n"
-                "Без параметра — все заявки."
-            )
-            return
-    rows = db.list_requests(status=status, limit=15)
-    if not rows:
-        await message.answer("Заявок не найдено.")
-        return
-    label = {
-        "new": "🆕 НОВАЯ",
-        "approved": "✅ ПРИНЯТА",
-        "rejected": "❌ ОТКЛОНЕНА",
-    }
-    lines = []
-    for r in rows:
-        user = db.get_user(r["user_id"])
-        uname = f"@{user['username']}" if user and user["username"] else f"ID {r['user_id']}"
-        lines.append(
-            f"#{r['id']} {label.get(r['status'], r['status'])} · {uname}\n"
-            f"    👤 {r['name']} · ☎️ {r['phone']}\n"
-            f"    💬 {r['comment'][:80]}\n"
-            f"    🕒 {r['created_at'][:16]}"
-        )
-    await message.answer("📋 Заявки:\n\n" + "\n\n".join(lines))
 
 
 @router.message(Command("add_code"))
@@ -487,7 +406,7 @@ async def cmd_withdraw(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     if not command.args or not command.args.isdigit():
-        await message.answer("Использование: /withdraw <номер заявки>")
+        await message.answer("Использование: /withdraw <номер вывода>")
         return
     wd = db.get_withdrawal(int(command.args))
     if not wd:
@@ -511,13 +430,13 @@ async def cmd_withdraw(message: Message, command: CommandObject):
         await message.answer(format_wd(wd), reply_markup=wd_kb)
 
 
-@router.message(Command("add_task"))
+@router.message(Command("addZad", ignore_case=True))
 async def cmd_add_task(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     args = command.args.split() if command.args else []
     if len(args) != 2 or not args[1].isdigit():
-        await message.answer("Использование: /add_task <@канал> <количество G>")
+        await message.answer("Использование: /addZad <@канал> <количество G>")
         return
     sponsor = args[0].lstrip("@")
     reward = int(args[1])
@@ -535,7 +454,7 @@ async def cmd_tasks(message: Message):
         return
     rows = db.list_tasks(active=None)
     if not rows:
-        await message.answer("Заданий нет. Создайте: /add_task <@канал> <G>")
+        await message.answer("Заданий нет. Создайте: /addZad <@канал> <G>")
         return
     cur = db.get_setting("currency", config.CURRENCY)
     lines = []
@@ -717,61 +636,6 @@ async def check_subscriptions_loop():
         await asyncio.sleep(180)
 
 
-@router.callback_query(F.data == "start_form")
-async def cq_start_form(cb: CallbackQuery, state: FSMContext):
-    await cb.answer()
-    await state.set_state(Form.name)
-    await cb.message.answer("Введите ваше имя:")
-
-
-@router.message(Form.name, F.text)
-async def form_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    await state.set_state(Form.phone)
-    await message.answer("Введите ваш телефон:")
-
-
-@router.message(Form.phone, F.text)
-async def form_phone(message: Message, state: FSMContext):
-    await state.update_data(phone=message.text)
-    await state.set_state(Form.comment)
-    await message.answer("Опишите задачу или отправьте «-»:")
-
-
-@router.message(Form.comment, F.text)
-async def form_comment(message: Message, state: FSMContext):
-    data = await state.update_data(comment=message.text)
-    await state.clear()
-
-    req_id = db.add_request(
-        message.from_user.id, data["name"], data["phone"], data["comment"]
-    )
-    req = db.get_request(req_id)
-
-    user = db.get_user(message.from_user.id)
-    if user["ref_id"] and user["ref_id"] != message.from_user.id:
-        referrer = db.get_user(user["ref_id"])
-        if referrer:
-            reward = db.get_setting("reward_form", config.DEFAULT_REWARD_FORM)
-            db.add_balance(user["ref_id"], reward)
-            await bot.send_message(
-                user["ref_id"],
-                f"🎉 Ваш приглашённый отправил заявку №{req_id}!\n"
-                f"Начислено: +{reward} {db.get_setting('currency', config.CURRENCY)}",
-            )
-
-    req_kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Принять", callback_data=f"req_approve:{req_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"req_reject:{req_id}"),
-            ]
-        ]
-    )
-    await notify_admin(format_request(req), req_kb)
-    await message.answer("✅ Заявка принята! Мы свяжемся с вами.", reply_markup=main_menu())
-
-
 @router.callback_query(F.data == "balance")
 async def cq_balance(cb: CallbackQuery):
     await cb.answer()
@@ -781,7 +645,7 @@ async def cq_balance(cb: CallbackQuery):
     await cb.message.answer(
         f"👛 Ваш баланс: {user['balance']} {cur}\n\n"
         f"🔗 Ваша реферальная ссылка:\n{link}\n"
-        "Приглашайте друзей — получайте валюту за их вступление и заявки!"
+        "Приглашайте друзей — получайте голду за их вступление и задания!"
     )
 
 
@@ -870,31 +734,6 @@ async def wd_screenshot(message: Message, state: FSMContext):
 @router.message(Withdraw.screenshot)
 async def wd_screenshot_other(message: Message):
     await message.answer("Отправьте именно фото — скриншот скина (кнопка 📎 → отправка фото).")
-
-
-@router.callback_query(F.data.startswith("req_"))
-async def cq_req_action(cb: CallbackQuery):
-    action, req_id = cb.data.split(":")
-    req = db.get_request(int(req_id))
-    if not req:
-        await cb.answer("Заявка не найдена", show_alert=True)
-        return
-
-    if action == "req_approve":
-        db.set_request_status(int(req_id), "approved")
-        await cb.message.edit_text(format_request(req) + "\n\nСтатус: ✅ ПРИНЯТА")
-        await bot.send_message(
-            req["user_id"],
-            f"✅ Ваша заявка №{req['id']} принята! Мы с вами свяжемся.",
-        )
-    else:
-        db.set_request_status(int(req_id), "rejected")
-        await cb.message.edit_text(format_request(req) + "\n\nСтатус: ❌ ОТКЛОНЕНА")
-        await bot.send_message(
-            req["user_id"],
-            f"❌ Ваша заявка №{req['id']} отклонена. Попробуйте оставить новую.",
-        )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("wd_"))

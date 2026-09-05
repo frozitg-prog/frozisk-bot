@@ -31,19 +31,6 @@ def init():
         )
         c.execute(
             """
-            CREATE TABLE IF NOT EXISTS requests (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                name TEXT,
-                phone TEXT,
-                comment TEXT,
-                status TEXT DEFAULT 'new',
-                created_at TEXT
-            )
-            """
-        )
-        c.execute(
-            """
             CREATE TABLE IF NOT EXISTS withdrawals (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
@@ -204,48 +191,6 @@ def set_balance(user_id, amount):
     conn.close()
 
 
-def add_request(user_id, name, phone, comment):
-    conn = connect()
-    cur = conn.execute(
-        "INSERT INTO requests (user_id, name, phone, comment, created_at) "
-        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-        (user_id, name, phone, comment, datetime.now().isoformat()),
-    )
-    req_id = cur.fetchone()["id"]
-    conn.commit()
-    conn.close()
-    return req_id
-
-
-def get_request(req_id):
-    conn = connect()
-    row = conn.execute("SELECT * FROM requests WHERE id = %s", (req_id,)).fetchone()
-    conn.close()
-    return row
-
-
-def set_request_status(req_id, status):
-    conn = connect()
-    conn.execute("UPDATE requests SET status = %s WHERE id = %s", (status, req_id))
-    conn.commit()
-    conn.close()
-
-
-def list_requests(status=None, limit=10):
-    conn = connect()
-    if status:
-        rows = conn.execute(
-            "SELECT * FROM requests WHERE status = %s ORDER BY id DESC LIMIT %s",
-            (status, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM requests ORDER BY id DESC LIMIT %s", (limit,)
-        ).fetchall()
-    conn.close()
-    return rows
-
-
 def add_withdrawal(user_id, amount, details, skin=None, screenshot=None):
     conn = connect()
     cur = conn.execute(
@@ -292,16 +237,6 @@ def list_user_withdrawals(user_id, limit=15):
     conn = connect()
     rows = conn.execute(
         "SELECT * FROM withdrawals WHERE user_id = %s ORDER BY id DESC LIMIT %s",
-        (user_id, limit),
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def list_user_requests(user_id, limit=15):
-    conn = connect()
-    rows = conn.execute(
-        "SELECT * FROM requests WHERE user_id = %s ORDER BY id DESC LIMIT %s",
         (user_id, limit),
     ).fetchall()
     conn.close()
@@ -426,17 +361,11 @@ def list_completions_rewarded():
 def stats():
     conn = connect()
     users = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
-    new_requests = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM requests WHERE status = 'new'"
-    ).fetchone()["cnt"]
-    all_requests = conn.execute("SELECT COUNT(*) AS cnt FROM requests").fetchone()["cnt"]
     pending_wds = conn.execute(
         "SELECT COUNT(*) AS cnt FROM withdrawals WHERE status = 'pending'"
     ).fetchone()["cnt"]
     conn.close()
     return {
         "users": users,
-        "new_requests": new_requests,
-        "all_requests": all_requests,
         "pending_wds": pending_wds,
     }
