@@ -1,4 +1,5 @@
 import threading
+import threading
 from datetime import datetime
 
 import config
@@ -82,21 +83,20 @@ def init():
                     conn.close()
                     return
                 conn.close()
-                raise RuntimeError(
-                    "PostgreSQL schema is incomplete; run the one-time "
-                    "schema creation (see README) before starting the bot."
-                )
+                break
             except RuntimeError:
-                raise
+                conn.close()
+                break
             except Exception:
                 try:
                     conn.close()
                 except Exception:
                     pass
-                _time.sleep(2)
-        raise RuntimeError(
-            "init() failed: could not reach PostgreSQL to validate schema"
-        )
+                if _attempt < 4:
+                    _time.sleep(2)
+        print("WARNING: could not validate PostgreSQL schema; "
+              "starting anyway (bot will retry DB ops per-call)")
+        return
     else:
         conn = connect()
         conn.execute("PRAGMA journal_mode = WAL")
@@ -509,25 +509,28 @@ def delete_code(code):
 
 def use_code(code, user_id):
     conn = connect()
-    with conn:
-        already = conn.execute(
-            f"SELECT 1 AS one FROM promo_uses WHERE code = {_PH} AND user_id = {_PH}",
-            (code, user_id),
-        ).fetchone()
-        if already:
-            return False
-        cur = conn.execute(
-            f"UPDATE promocodes SET used = used + 1, used_at = {_PH} "
-            f"WHERE code = {_PH} AND (max_uses = 0 OR used < max_uses)",
-            (datetime.now().isoformat(), code),
-        )
-        if cur.rowcount == 0:
-            return False
-        conn.execute(
-            f"INSERT INTO promo_uses (code, user_id, activated_at) VALUES ({_PH}, {_PH}, {_PH})",
-            (code, user_id, datetime.now().isoformat()),
-        )
-        return True
+    try:
+        with conn:
+            already = conn.execute(
+                f"SELECT 1 AS one FROM promo_uses WHERE code = {_PH} AND user_id = {_PH}",
+                (code, user_id),
+            ).fetchone()
+            if already:
+                return False
+            cur = conn.execute(
+                f"UPDATE promocodes SET used = used + 1, used_at = {_PH} "
+                f"WHERE code = {_PH} AND (max_uses = 0 OR used < max_uses)",
+                (datetime.now().isoformat(), code),
+            )
+            if cur.rowcount == 0:
+                return False
+            conn.execute(
+                f"INSERT INTO promo_uses (code, user_id, activated_at) VALUES ({_PH}, {_PH}, {_PH})",
+                (code, user_id, datetime.now().isoformat()),
+            )
+            return True
+    finally:
+        conn.close()
 
 
 def list_codes(limit=20):

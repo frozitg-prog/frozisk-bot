@@ -1112,11 +1112,19 @@ async def cmd_ban_unban(message: Message, command: CommandObject, banned: bool, 
     if not args:
         await message.answer(f"Использование: /{action_name} <id или @ник>")
         return
-    target = parse_ban_target(args[0])
+    try:
+        target = parse_ban_target(args[0])
+    except Exception:
+        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+        return
     if not target:
         await message.answer("Пользователь не найден.")
         return
-    db.set_ban(target, banned)
+    try:
+        db.set_ban(target, banned)
+    except Exception:
+        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+        return
     _moderation_cache.pop(target, None)
     await message.answer(
         f"🔨 Пользователь {target} забанен." if banned
@@ -1131,11 +1139,19 @@ async def cmd_mute_unmute(message: Message, command: CommandObject, muted: bool,
     if not args:
         await message.answer(f"Использование: /{action_name} <id или @ник>")
         return
-    target = parse_ban_target(args[0])
+    try:
+        target = parse_ban_target(args[0])
+    except Exception:
+        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+        return
     if not target:
         await message.answer("Пользователь не найден.")
         return
-    db.set_mute(target, muted)
+    try:
+        db.set_mute(target, muted)
+    except Exception:
+        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+        return
     _moderation_cache.pop(target, None)
     await message.answer(
         f"🔇 Пользователь {target} замьючен." if muted
