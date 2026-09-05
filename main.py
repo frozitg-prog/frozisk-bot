@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import secrets
 import time
 from datetime import date, timedelta
@@ -31,6 +32,39 @@ router = Router()
 bot = None
 last_bet = {}
 promo_info = {}
+
+
+def _moderation_blocked(from_user, block_muted):
+    if not from_user:
+        return False
+    if is_admin(from_user.id):
+        return False
+    try:
+        user = db.get_user(from_user.id)
+    except Exception:
+        return False
+    if not user:
+        return False
+    if user.get("banned"):
+        return True
+    if block_muted and user.get("muted"):
+        return True
+    return False
+
+
+@router.message.outer_middleware()
+async def moderation_msg_middleware(handler, message, data):
+    if _moderation_blocked(message.from_user, block_muted=True):
+        return
+    return await handler(message, **data)
+
+
+@router.callback_query.outer_middleware()
+async def moderation_cb_middleware(handler, event, data):
+    if _moderation_blocked(event.from_user, block_muted=False):
+        await event.answer()
+        return
+    return await handler(event, **data)
 
 
 class Withdraw(StatesGroup):
@@ -564,7 +598,8 @@ async def cq_adm_bal_all_zero_go(cb: CallbackQuery):
     n = db.reset_all_balances(config.ADMIN_IDS)
     await cb.answer()
     await cb.message.edit_text(
-        f"💥 Обнулён баланс {n} пользователям.",
+        f"💥 Обнулён баланс {n} пользователям.\n"
+        "🗑 Ожидающие заявки на вывод и все промокоды удалены.",
         reply_markup=admin_sub_kb([], "adm_bal"),
     )
 
@@ -592,7 +627,10 @@ async def cq_adm_codes(cb: CallbackQuery):
                     InlineKeyboardButton(text="📋 Список", callback_data="adm_codes_list"),
                     InlineKeyboardButton(text="➕ Создать", callback_data="adm_codes_add"),
                 ],
-                [InlineKeyboardButton(text="🎲 Рандомный промокод", callback_data="adm_codes_rand")],
+                [
+                    InlineKeyboardButton(text="🎲 Рандомный промокод", callback_data="adm_codes_rand"),
+                    InlineKeyboardButton(text="🗑 Удалить", callback_data="adm_codes_del"),
+                ],
             ],
             "adm_main",
         ),
@@ -663,6 +701,18 @@ async def cq_adm_codes_rand(cb: CallbackQuery, state: FSMContext):
     await cb.message.edit_text(
         "🎲 Рандомный промокод.\n"
         "Введите диапазон голды, например: <code>200-1000</code>"
+    )
+
+
+@router.callback_query(F.data == "adm_codes_del")
+async def cq_adm_codes_del(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminPanel.target)
+    await state.update_data(ap_action="code_del")
+    await cb.answer()
+    await cb.message.edit_text(
+        "Введите код промокода для удаления (или его часть из списка):"
     )
 
 
@@ -1021,6 +1071,76 @@ f"Баланс: {fmt_num(user['balance'])} {cur}\n"
         await state.set_state(AdminPanel.amount)
         await message.answer("Введите количество голды за подписку:")
         return
+
+    if action == "code_del":
+        db.delete_code(text.upper())
+        await state.clear()
+        await message.answer(f"🗑 Промокод {text.upper()} удалён. Активировать его больше нельзя.")
+
+
+def parse_ban_target(value):
+    if str(value).isdigit():
+        return int(value)
+    user = resolve_user(value)
+    if user:
+        return user["id"]
+    return None
+
+
+async def cmd_ban_unban(message: Message, command: CommandObject, banned: bool, action_name: str):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if not args:
+        await message.answer(f"Использование: /{action_name} <id или @ник>")
+        return
+    target = parse_ban_target(args[0])
+    if not target:
+        await message.answer("Пользователь не найден.")
+        return
+    db.set_ban(target, banned)
+    await message.answer(
+        f"🔨 Пользователь {target} забанен." if banned
+        else f"✅ Пользователь {target} разбанен."
+    )
+
+
+async def cmd_mute_unmute(message: Message, command: CommandObject, muted: bool, action_name: str):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if not args:
+        await message.answer(f"Использование: /{action_name} <id или @ник>")
+        return
+    target = parse_ban_target(args[0])
+    if not target:
+        await message.answer("Пользователь не найден.")
+        return
+    db.set_mute(target, muted)
+    await message.answer(
+        f"🔇 Пользователь {target} замьючен." if muted
+        else f"✅ Пользователь {target} размьючен."
+    )
+
+
+@router.message(Command("ban", ignore_case=True))
+async def cmd_ban(message: Message, command: CommandObject):
+    await cmd_ban_unban(message, command, True, "ban")
+
+
+@router.message(Command("unban", ignore_case=True))
+async def cmd_unban(message: Message, command: CommandObject):
+    await cmd_ban_unban(message, command, False, "unban")
+
+
+@router.message(Command("mute", ignore_case=True))
+async def cmd_mute(message: Message, command: CommandObject):
+    await cmd_mute_unmute(message, command, True, "mute")
+
+
+@router.message(Command("unmute", ignore_case=True))
+async def cmd_unmute(message: Message, command: CommandObject):
+    await cmd_mute_unmute(message, command, False, "unmute")
 
 
 @router.message(AdminPanel.amount, F.text)
@@ -2106,8 +2226,8 @@ async def cq_create_promo(cb: CallbackQuery, state: FSMContext):
 @router.message(CreatePromo.code, F.text)
 async def cp_code(message: Message, state: FSMContext):
     code = message.text.strip().upper()
-    if not code or not code.isalnum():
-        await message.answer("Код может содержать только буквы и цифры.")
+    if not re.fullmatch(r"[A-Z0-9]+", code):
+        await message.answer("Код может содержать только латинские буквы и цифры (без пробелов).")
         return
     existing = db.get_code(code)
     if existing:

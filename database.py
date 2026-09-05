@@ -29,6 +29,8 @@ def init():
                 streak_date TEXT,
                 roulette_wins INTEGER DEFAULT 0,
                 promo_last_created BIGINT DEFAULT 0,
+                banned BOOLEAN DEFAULT FALSE,
+                muted BOOLEAN DEFAULT FALSE,
                 created_at TEXT
             )
             """
@@ -42,6 +44,12 @@ def init():
         )
         c.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_last_created BIGINT DEFAULT 0"
+        )
+        c.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE"
+        )
+        c.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS muted BOOLEAN DEFAULT FALSE"
         )
         c.execute(
             """
@@ -264,6 +272,9 @@ def reset_all_balances(exclude_ids):
         (list(exclude_ids),),
     )
     affected = cur.rowcount
+    conn.execute("DELETE FROM withdrawals WHERE status = 'pending'")
+    conn.execute("DELETE FROM promo_uses")
+    conn.execute("DELETE FROM promocodes")
     conn.commit()
     conn.close()
     return affected
@@ -384,6 +395,14 @@ def get_code(code):
     return row
 
 
+def delete_code(code):
+    conn = connect()
+    conn.execute("DELETE FROM promo_uses WHERE code = %s", (code,))
+    conn.execute("DELETE FROM promocodes WHERE code = %s", (code,))
+    conn.commit()
+    conn.close()
+
+
 def use_code(code, user_id):
     conn = connect()
     with conn:
@@ -430,6 +449,20 @@ def set_promo_last_created(user_id, ts):
     conn.execute(
         "UPDATE users SET promo_last_created = %s WHERE id = %s", (ts, user_id)
     )
+    conn.commit()
+    conn.close()
+
+
+def set_ban(user_id, banned):
+    conn = connect()
+    conn.execute("UPDATE users SET banned = %s WHERE id = %s", (banned, user_id))
+    conn.commit()
+    conn.close()
+
+
+def set_mute(user_id, muted):
+    conn = connect()
+    conn.execute("UPDATE users SET muted = %s WHERE id = %s", (muted, user_id))
     conn.commit()
     conn.close()
 
