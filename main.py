@@ -40,8 +40,9 @@ async def _moderation_blocked_async(from_user, block_muted):
     if is_admin(from_user.id):
         return False
     try:
-        async with asyncio.timeout(5):
-            user = await asyncio.to_thread(db.get_user, from_user.id)
+        user = await asyncio.wait_for(
+            asyncio.to_thread(db.get_user, from_user.id), timeout=5
+        )
     except Exception:
         return False
     if not user:
