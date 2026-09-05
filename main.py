@@ -58,7 +58,7 @@ async def _moderation_blocked_async(from_user, block_muted):
 async def moderation_msg_middleware(handler, message, data):
     if await _moderation_blocked_async(message.from_user, block_muted=True):
         return
-    return await handler(message, **data)
+    return await handler(message, data)
 
 
 @router.callback_query.outer_middleware()
@@ -66,7 +66,7 @@ async def moderation_cb_middleware(handler, event, data):
     if await _moderation_blocked_async(event.from_user, block_muted=False):
         await event.answer()
         return
-    return await handler(event, **data)
+    return await handler(event, data)
 
 
 class Withdraw(StatesGroup):
