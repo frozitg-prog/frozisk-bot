@@ -28,7 +28,6 @@ bot = None
 
 class Withdraw(StatesGroup):
     price = State()
-    skin = State()
     screenshot = State()
 
 
@@ -178,6 +177,17 @@ async def cmd_set_currency(message: Message, command: CommandObject):
         return
     db.set_setting("currency", command.args.strip())
     await message.answer(f"Валюта установлена: {command.args.strip()}")
+
+
+@router.message(Command("set_skin"))
+async def cmd_set_skin(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args:
+        await message.answer("Использование: /set_skin <текст скина>")
+        return
+    db.set_setting("withdraw_skin", command.args.strip())
+    await message.answer(f"Скин установлен: {command.args.strip()}")
 
 
 def resolve_user(value):
@@ -654,10 +664,13 @@ async def cq_start_withdraw(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     min_wd = db.get_setting("min_withdraw", config.DEFAULT_MIN_WITHDRAW)
     cur = db.get_setting("currency", config.CURRENCY)
+    skin = db.get_setting("withdraw_skin", config.DEFAULT_SKIN)
     await state.set_state(Withdraw.price)
     await cb.message.answer(
-        f"Вывод средств.\n"
-        f"1️⃣ Укажите цену скина в {cur}.\n"
+        f"Вывод средств.\n\n"
+        f"1️⃣ Выставьте на продажу этот скин:\n"
+        f"🔫 {skin}\n\n"
+        f"2️⃣ Укажите цену в {cur}.\n"
         f"Минимальная сумма: {min_wd} {cur}."
     )
 
@@ -677,16 +690,10 @@ async def wd_price(message: Message, state: FSMContext):
     if user["balance"] < amount:
         await message.answer("На балансе недостаточно голды.")
         return
-    await state.update_data(amount=amount)
-    await state.set_state(Withdraw.skin)
-    await message.answer("2️⃣ Введите название скина / паттерна:")
-
-
-@router.message(Withdraw.skin, F.text)
-async def wd_skin(message: Message, state: FSMContext):
-    await state.update_data(skin=message.text)
+    skin = db.get_setting("withdraw_skin", config.DEFAULT_SKIN)
+    await state.update_data(amount=amount, skin=skin)
     await state.set_state(Withdraw.screenshot)
-    await message.answer("3️⃣ Отправьте скриншот скина (фото):")
+    await message.answer("📸 Отправьте скриншот выставленного скина (фото):")
 
 
 @router.message(Withdraw.screenshot, F.photo)
