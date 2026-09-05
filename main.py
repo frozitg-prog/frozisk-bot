@@ -345,8 +345,8 @@ async def cmd_withdraw(message: Message, command: CommandObject):
     wd_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton("✅ Выплатить", callback_data=f"wd_approve:{wd['id']}"),
-                InlineKeyboardButton("❌ Отклонить", callback_data=f"wd_reject:{wd['id']}"),
+                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"wd_approve:{wd['id']}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"wd_reject:{wd['id']}"),
             ]
         ]
     )
@@ -434,7 +434,7 @@ async def cq_earn_gold(cb: CallbackQuery):
     lines = ["💰 Задания. Подпишитесь на спонсоров и нажмите «Проверить»:\n"]
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(f"Задание #{t['id']}", callback_data=f"task_info:{t['id']}")]
+            [InlineKeyboardButton(text=f"Задание #{t['id']}", callback_data=f"task_info:{t['id']}")]
             for t in tasks
         ]
     )
@@ -455,10 +455,10 @@ async def cq_task_info(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{task['sponsor']}"),
-                InlineKeyboardButton("✅ Проверить подписку", callback_data=f"task_check:{task_id}"),
+                InlineKeyboardButton(text="Перейти в канал", url=f"https://t.me/{task['sponsor']}"),
+                InlineKeyboardButton(text="✅ Проверить подписку", callback_data=f"task_check:{task_id}"),
             ],
-            [InlineKeyboardButton("↩️ Назад", callback_data="earn_gold")],
+            [InlineKeyboardButton(text="↩️ Назад", callback_data="earn_gold")],
         ]
     )
     await cb.message.edit_text(
@@ -612,8 +612,8 @@ async def form_comment(message: Message, state: FSMContext):
     req_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton("✅ Принять", callback_data=f"req_approve:{req_id}"),
-                InlineKeyboardButton("❌ Отклонить", callback_data=f"req_reject:{req_id}"),
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"req_approve:{req_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"req_reject:{req_id}"),
             ]
         ]
     )
@@ -691,8 +691,8 @@ async def wd_screenshot(message: Message, state: FSMContext):
     wd_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton("✅ Выплатить", callback_data=f"wd_approve:{wd_id}"),
-                InlineKeyboardButton("❌ Отклонить", callback_data=f"wd_reject:{wd_id}"),
+                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"wd_approve:{wd_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"wd_reject:{wd_id}"),
             ]
         ]
     )
