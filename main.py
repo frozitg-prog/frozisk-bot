@@ -191,11 +191,11 @@ async def cmd_set_skin(message: Message, command: CommandObject):
 
 
 def resolve_user(value):
-    value = (value or "").strip()
+    value = (value or "").strip().lstrip("@")
     if value.isdigit():
         return db.get_user(int(value))
-    if value.startswith("@"):
-        return db.get_user_by_username(value)
+    if value:
+        return db.get_user_by_username("@" + value)
     return None
 
 
