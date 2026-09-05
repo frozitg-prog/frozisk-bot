@@ -63,7 +63,10 @@ def main_menu():
                 InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo"),
                 InlineKeyboardButton(text="💰 Заработать голду", callback_data="earn_gold"),
             ],
-            [InlineKeyboardButton(text="🔥 Стрик", callback_data="streak")],
+            [
+                InlineKeyboardButton(text="🔥 Стрик", callback_data="streak"),
+                InlineKeyboardButton(text="🏆 Топ", callback_data="top"),
+            ],
         ]
     )
 
@@ -74,9 +77,40 @@ def is_admin(user_id):
 
 def fmt_num(v):
     f = float(v)
+    if abs(f) >= 1_000_000:
+        return _word_amount(f / 1_000_000, ["миллион", "миллиона", "миллионов"])
+    if abs(f) >= 1_000:
+        return _word_amount(f / 1_000, ["тысяча", "тысячи", "тысяч"])
     if f.is_integer():
         return str(int(f))
     return f"{f:.8f}".rstrip("0").rstrip(".")
+
+
+fmt_short = fmt_num
+
+
+def _trim_dec(d):
+    if d == int(d):
+        return str(int(d))
+    return f"{d:.2f}".rstrip("0").rstrip(".")
+
+
+def _word_amount(d, forms):
+    s = _trim_dec(d)
+    n = int(d)
+    mod = n % 10
+    if d != int(d):
+        if 1 <= mod <= 4 and n % 100 not in (11, 12, 13, 14):
+            word = forms[1]
+        else:
+            word = forms[2]
+    elif mod == 1 and n % 100 != 11:
+        word = forms[0]
+    elif 2 <= mod <= 4 and n % 100 not in (12, 13, 14):
+        word = forms[1]
+    else:
+        word = forms[2]
+    return f"{s} {word}"
 
 
 def admin_main_kb():
@@ -1312,6 +1346,7 @@ def play_roulette(user_id, amount):
     if win:
         payout = amount * mult
         db.add_balance(user_id, payout)
+        db.add_roulette_win(user_id)
         return (
             f"🎉 Вы выиграли!\n"
             f"Ставка: {fmt_num(amount)} {cur}\n"
@@ -1347,6 +1382,76 @@ async def cq_roulette_change(cb: CallbackQuery, state: FSMContext):
 async def cq_back_to_menu(cb: CallbackQuery):
     await cb.answer()
     await cb.message.edit_text("Главное меню:", reply_markup=main_menu())
+
+
+def top_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="💰 По балансу", callback_data="top_bal"),
+                InlineKeyboardButton(text="🎰 Победы в рулетке", callback_data="top_roulette"),
+            ],
+            [InlineKeyboardButton(text="👥 По рефералам", callback_data="top_refs")],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+
+
+def render_top(rows, item_label, value_key):
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"🏆 Топ — {item_label}", ""]
+    for i, r in enumerate(rows):
+        medal = medals[i] if i < len(medals) else f"{i + 1}."
+        name = r["username"] or r["first_name"] or f"ID {r['id']}"
+        display = f"@{name}" if r["username"] else name
+        value = fmt_short(r[value_key])
+        lines.append(f"{medal} {display} — {value}")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "top")
+async def cq_top(cb: CallbackQuery):
+    await cb.answer()
+    await cb.message.edit_text(
+        "🏆 Топ пользователей. Выберите категорию:", reply_markup=top_kb()
+    )
+
+
+@router.callback_query(F.data == "top_bal")
+async def cq_top_bal(cb: CallbackQuery):
+    await cb.answer()
+    cur = db.get_setting("currency", config.CURRENCY)
+    rows = db.top_balance(10)
+    if not rows:
+        await cb.message.answer("Пока пусто — начните зарабатывать голду!")
+        return
+    await cb.message.answer(
+        render_top(rows, f"по балансу · {cur}", "balance")
+    )
+
+
+@router.callback_query(F.data == "top_roulette")
+async def cq_top_roulette(cb: CallbackQuery):
+    await cb.answer()
+    rows = db.top_roulette(10)
+    if not rows:
+        await cb.message.answer("Пока никто не выигрывал в рулетке.")
+        return
+    await cb.message.answer(
+        render_top(rows, "победы в рулетке", "roulette_wins")
+    )
+
+
+@router.callback_query(F.data == "top_refs")
+async def cq_top_refs(cb: CallbackQuery):
+    await cb.answer()
+    rows = db.top_referrals(10)
+    if not rows:
+        await cb.message.answer("Пока никого не пригласили.")
+        return
+    await cb.message.answer(
+        render_top(rows, "по рефералам", "refs")
+    )
 
 
 @router.callback_query(F.data.startswith("task_info:"))

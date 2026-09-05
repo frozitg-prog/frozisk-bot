@@ -27,6 +27,7 @@ def init():
                 balance DOUBLE PRECISION DEFAULT 0,
                 streak INTEGER DEFAULT 0,
                 streak_date TEXT,
+                roulette_wins INTEGER DEFAULT 0,
                 created_at TEXT
             )
             """
@@ -35,6 +36,9 @@ def init():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS streak INTEGER DEFAULT 0"
         )
         c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_date TEXT")
+        c.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS roulette_wins INTEGER DEFAULT 0"
+        )
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS withdrawals (
@@ -219,6 +223,87 @@ def update_streak(user_id, days, last_date):
     )
     conn.commit()
     conn.close()
+
+
+def add_balance_all(amount, exclude_ids):
+    conn = connect()
+    cur = conn.execute(
+        "UPDATE users SET balance = balance + %s WHERE NOT (id = ANY(%s))",
+        (amount, list(exclude_ids)),
+    )
+    affected = cur.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def subtract_balance_all(amount, exclude_ids):
+    conn = connect()
+    cur = conn.execute(
+        "UPDATE users SET balance = GREATEST(balance - %s, 0) WHERE NOT (id = ANY(%s))",
+        (amount, list(exclude_ids)),
+    )
+    affected = cur.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def reset_all_balances(exclude_ids):
+    conn = connect()
+    cur = conn.execute(
+        "UPDATE users SET balance = 0 WHERE NOT (id = ANY(%s))",
+        (list(exclude_ids),),
+    )
+    affected = cur.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def add_roulette_win(user_id):
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET roulette_wins = roulette_wins + 1 WHERE id = %s",
+        (user_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def top_balance(limit=10):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT id, username, first_name, balance FROM users "
+        "WHERE balance > 0 ORDER BY balance DESC LIMIT %s",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def top_referrals(limit=10):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT u.id, u.username, u.first_name, COUNT(*) AS refs "
+        "FROM users u JOIN users r ON r.ref_id = u.id "
+        "WHERE r.ref_id != r.id "
+        "GROUP BY u.id ORDER BY refs DESC LIMIT %s",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def top_roulette(limit=10):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT id, username, first_name, roulette_wins FROM users "
+        "WHERE roulette_wins > 0 ORDER BY roulette_wins DESC LIMIT %s",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return rows
 
 
 def add_withdrawal(user_id, amount, details, skin=None, screenshot=None):
