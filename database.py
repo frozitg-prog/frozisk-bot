@@ -10,6 +10,7 @@ def connect():
     conn = psycopg.connect(
         config.DATABASE_URL,
         row_factory=dict_row,
+        connect_timeout=10,
     )
     return conn
 

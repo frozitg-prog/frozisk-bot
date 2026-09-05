@@ -34,13 +34,14 @@ last_bet = {}
 promo_info = {}
 
 
-def _moderation_blocked(from_user, block_muted):
+async def _moderation_blocked_async(from_user, block_muted):
     if not from_user:
         return False
     if is_admin(from_user.id):
         return False
     try:
-        user = db.get_user(from_user.id)
+        async with asyncio.timeout(5):
+            user = await asyncio.to_thread(db.get_user, from_user.id)
     except Exception:
         return False
     if not user:
@@ -54,14 +55,14 @@ def _moderation_blocked(from_user, block_muted):
 
 @router.message.outer_middleware()
 async def moderation_msg_middleware(handler, message, data):
-    if _moderation_blocked(message.from_user, block_muted=True):
+    if await _moderation_blocked_async(message.from_user, block_muted=True):
         return
     return await handler(message, **data)
 
 
 @router.callback_query.outer_middleware()
 async def moderation_cb_middleware(handler, event, data):
-    if _moderation_blocked(event.from_user, block_muted=False):
+    if await _moderation_blocked_async(event.from_user, block_muted=False):
         await event.answer()
         return
     return await handler(event, **data)
