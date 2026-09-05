@@ -262,16 +262,22 @@ async def cmd_set_currency(message: Message, command: CommandObject):
     await message.answer(f"Валюта установлена: {command.args.strip()}")
 
 
+def resolve_user(value):
+    value = (value or "").strip()
+    if value.isdigit():
+        return db.get_user(int(value))
+    if value.startswith("@"):
+        return db.get_user_by_username(value)
+    return None
+
+
 @router.message(Command("userbalance"))
 async def cmd_userbalance(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
-    if not command.args or not command.args.isdigit():
-        await message.answer("Использование: /userbalance <id пользователя>")
-        return
-    user = db.get_user(int(command.args))
+    user = resolve_user(command.args)
     if not user:
-        await message.answer("Пользователь не найден.")
+        await message.answer("Использование: /userbalance <id или @юзернейм>")
         return
     cur = db.get_setting("currency", config.CURRENCY)
     referrals = db.count_referrals(user["id"])
@@ -382,10 +388,11 @@ async def cq_ub_wd(cb: CallbackQuery):
 async def cmd_userwithdrawals(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
-    if not command.args or not command.args.isdigit():
-        await message.answer("Использование: /userwithdrawals <id пользователя>")
+    target = resolve_user(command.args)
+    if not target:
+        await message.answer("Использование: /userwithdrawals <id или @юзернейм>")
         return
-    rows = db.list_user_withdrawals(int(command.args))
+    rows = db.list_user_withdrawals(target["id"])
     if not rows:
         await message.answer("У этого пользователя нет выводов.")
         return
@@ -398,7 +405,7 @@ async def cmd_userwithdrawals(message: Message, command: CommandObject):
             f"🎮 {r.get('skin') or '—'} · {r['created_at'][:16]}\n"
             f"    📋 /withdraw {r['id']}"
         )
-    await message.answer(f"💸 Выводы пользователя {command.args}:\n\n" + "\n\n".join(lines))
+    await message.answer(f"💸 Выводы пользователя @{target['username'] or target['id']}:\n\n" + "\n\n".join(lines))
 
 
 @router.message(Command("addbal"))
@@ -406,17 +413,18 @@ async def cmd_addbal(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     args = command.args.split() if command.args else []
-    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
-        await message.answer("Использование: /addbal <id пользователя> <количество G>")
+    if len(args) != 2 or not args[1].isdigit():
+        await message.answer("Использование: /addbal <id или @ник> <количество G>")
         return
-    user = db.get_user(int(args[0]))
+    user = resolve_user(args[0])
     if not user:
         await message.answer("Пользователь не найден.")
         return
-    db.add_balance(int(args[0]), int(args[1]))
+    db.add_balance(user["id"], int(args[1]))
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
-        f"Начислено +{args[1]} {cur} пользователю {user['first_name']} (ID {args[0]})."
+        f"Начислено +{args[1]} {cur} пользователю {user['first_name']}"
+        f" (@{user['username'] or user['id']})."
     )
 
 
@@ -425,17 +433,18 @@ async def cmd_subbal(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     args = command.args.split() if command.args else []
-    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
-        await message.answer("Использование: /subbal <id пользователя> <количество G>")
+    if len(args) != 2 or not args[1].isdigit():
+        await message.answer("Использование: /subbal <id или @ник> <количество G>")
         return
-    user = db.get_user(int(args[0]))
+    user = resolve_user(args[0])
     if not user:
         await message.answer("Пользователь не найден.")
         return
-    db.spend_balance(int(args[0]), int(args[1]))
+    db.spend_balance(user["id"], int(args[1]))
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
-        f"Списано −{args[1]} {cur} у пользователя {user['first_name']} (ID {args[0]})."
+        f"Списано −{args[1]} {cur} у пользователя {user['first_name']}"
+        f" (@{user['username'] or user['id']})."
     )
 
 

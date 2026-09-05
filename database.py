@@ -151,6 +151,16 @@ def get_user(user_id):
     return row
 
 
+def get_user_by_username(username):
+    conn = connect()
+    row = conn.execute(
+        "SELECT * FROM users WHERE lower(username) = lower(?)",
+        (username.lstrip("@"),),
+    ).fetchone()
+    conn.close()
+    return row
+
+
 def count_referrals(ref_id):
     conn = connect()
     count = conn.execute(
