@@ -184,14 +184,18 @@ async def cmd_add_code(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     args = command.args.split() if command.args else []
-    if len(args) != 2 or not args[1].isdigit():
-        await message.answer("Использование: /add_code <КОД> <количество голды>")
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer(
+            "Использование: /add_code <КОД> <количество голды> [кол-во активаций]"
+        )
         return
     code = args[0].upper()
     amount = int(args[1])
-    db.add_code(code, amount)
+    max_uses = int(args[2]) if len(args) > 2 and args[2].isdigit() else 1
+    db.add_code(code, amount, max_uses=max_uses)
     cur = db.get_setting("currency", config.CURRENCY)
-    await message.answer(f"Промокод {code} создан на {amount} {cur}.")
+    uses = "без лимита" if max_uses <= 0 else f"{max_uses} активаций"
+    await message.answer(f"Промокод {code} создан на {amount} {cur}. Активаций: {uses}.")
 
 
 @router.message(Command("codes"))
@@ -205,7 +209,9 @@ async def cmd_codes(message: Message):
     cur = db.get_setting("currency", config.CURRENCY)
     lines = []
     for r in rows:
-        state = "✅ использован (x" + str(r["used_by"]) + ")" if r["used"] else "🆕 активен"
+        total = r.get("max_uses") if r.get("max_uses") is not None else 1
+        left = "∞" if total == 0 else max(total - r["used"], 0)
+        state = "✅ использован" if total != 0 and r["used"] >= total else f"🆕 {r['used']}/{total}"
         lines.append(f"{r['code']} — {r['amount']} {cur} — {state}")
     await message.answer("🎁 Промокоды:\n" + "\n".join(lines))
 
@@ -420,7 +426,13 @@ async def cq_adm_codes_list(cb: CallbackQuery):
     cur = db.get_setting("currency", config.CURRENCY)
     lines = []
     for r in rows:
-        state = "✅ использован (x" + str(r["used_by"]) + ")" if r["used"] else "🆕 активен"
+        total = r.get("max_uses") if r.get("max_uses") is not None else 1
+        if total == 0:
+            state = f"🆕 {r['used']}/∞"
+        elif r["used"] >= total:
+            state = f"✅ {r['used']}/{total} использован"
+        else:
+            state = f"🆕 {r['used']}/{total}"
         lines.append(f"{r['code']} — {r['amount']} {cur} — {state}")
     await cb.answer()
     await cb.message.edit_text(
@@ -437,6 +449,24 @@ async def cq_adm_codes_add(cb: CallbackQuery, state: FSMContext):
     await state.update_data(ap_action="code")
     await cb.answer()
     await cb.message.edit_text("Введите промокод (латиницей):")
+
+
+@router.callback_query(F.data.startswith("adm_code_uses:"))
+async def cq_adm_code_uses(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    max_uses = int(cb.data.split(":")[1])
+    data = await state.get_data()
+    await state.clear()
+    cur = db.get_setting("currency", config.CURRENCY)
+    db.add_code(data["ap_code"], data["ap_code_amount"], max_uses=max_uses)
+    uses = "без лимита (∞)" if max_uses <= 0 else f"{max_uses} активаций"
+    await cb.answer()
+    await cb.message.edit_text(
+        f"🎁 Промокод {data['ap_code']} создан на {data['ap_code_amount']} {cur}.\n"
+        f"Активаций: {uses}.",
+        reply_markup=admin_sub_kb([], "adm_codes"),
+    )
 
 
 @router.callback_query(F.data == "adm_tasks")
@@ -681,9 +711,27 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         await state.clear()
         await message.answer(f"➖ Списано −{value:g} {cur}.")
     elif action == "code":
-        db.add_code(data["ap_code"], int(value))
-        await state.clear()
-        await message.answer(f"🎁 Промокод {data['ap_code']} создан на {int(value)} {cur}.")
+        await state.update_data(ap_code_amount=int(value))
+        uses_kb = admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(text="1", callback_data="adm_code_uses:1"),
+                    InlineKeyboardButton(text="3", callback_data="adm_code_uses:3"),
+                    InlineKeyboardButton(text="5", callback_data="adm_code_uses:5"),
+                ],
+                [
+                    InlineKeyboardButton(text="10", callback_data="adm_code_uses:10"),
+                    InlineKeyboardButton(text="50", callback_data="adm_code_uses:50"),
+                    InlineKeyboardButton(text="∞", callback_data="adm_code_uses:0"),
+                ],
+            ],
+            "adm_codes",
+        )
+        await message.answer(
+            f"🎁 Промокод {data['ap_code']} на {int(value)} {cur}.\n"
+            "Сколько активаций разрешить?",
+            reply_markup=uses_kb,
+        )
     elif action == "task_rew":
         task_id = db.add_task(data["ap_task_chan"], int(value))
         await state.clear()
@@ -1353,12 +1401,15 @@ async def activate_promo(user_id, code_text):
     code = code_text.strip().upper()
     cur = db.get_setting("currency", config.CURRENCY)
     pc = db.get_code(code)
-    if not pc or pc["used"]:
-        return None, f"Промокод {code} не найден или уже использован."
+    if not pc:
+        return None, f"Промокод {code} не найден."
+    max_uses = pc.get("max_uses") if pc.get("max_uses") is not None else 1
+    if max_uses != 0 and pc["used"] >= max_uses:
+        return None, f"Промокод {code} уже использован."
     if db.use_code(code, user_id):
         db.add_balance(user_id, pc["amount"])
         return pc, f"🎉 Промокод {code} активирован!\nНачислено: +{pc['amount']} {cur} на баланс."
-    return None, f"Промокод {code} не найден или уже использован."
+    return None, f"Промокод {code} уже использован вами."
 
 
 @router.callback_query(F.data == "start_promo")

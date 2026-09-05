@@ -57,9 +57,23 @@ def init():
                 code TEXT PRIMARY KEY,
                 amount DOUBLE PRECISION,
                 used INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 1,
                 used_by BIGINT,
                 used_at TEXT,
                 created_at TEXT
+            )
+            """
+        )
+        c.execute(
+            "ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 1"
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS promo_uses (
+                code TEXT,
+                user_id BIGINT,
+                activated_at TEXT,
+                PRIMARY KEY (code, user_id)
             )
             """
         )
@@ -243,12 +257,12 @@ def list_user_withdrawals(user_id, limit=15):
     return rows
 
 
-def add_code(code, amount):
+def add_code(code, amount, max_uses=1):
     conn = connect()
     conn.execute(
-        "INSERT INTO promocodes (code, amount, created_at) VALUES (%s, %s, %s) "
+        "INSERT INTO promocodes (code, amount, max_uses, created_at) VALUES (%s, %s, %s, %s) "
         "ON CONFLICT (code) DO NOTHING",
-        (code, amount, datetime.now().isoformat()),
+        (code, amount, max_uses, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -263,14 +277,25 @@ def get_code(code):
 
 def use_code(code, user_id):
     conn = connect()
-    cur = conn.execute(
-        "UPDATE promocodes SET used = 1, used_by = %s, used_at = %s "
-        "WHERE code = %s AND used = 0",
-        (user_id, datetime.now().isoformat(), code),
-    )
-    conn.commit()
-    conn.close()
-    return cur.rowcount > 0
+    with conn:
+        already = conn.execute(
+            "SELECT 1 FROM promo_uses WHERE code = %s AND user_id = %s",
+            (code, user_id),
+        ).fetchone()
+        if already:
+            return False
+        cur = conn.execute(
+            "UPDATE promocodes SET used = used + 1, used_at = %s "
+            "WHERE code = %s AND (max_uses = 0 OR used < max_uses)",
+            (datetime.now().isoformat(), code),
+        )
+        if cur.rowcount == 0:
+            return False
+        conn.execute(
+            "INSERT INTO promo_uses (code, user_id, activated_at) VALUES (%s, %s, %s)",
+            (code, user_id, datetime.now().isoformat()),
+        )
+    return True
 
 
 def list_codes(limit=20):
