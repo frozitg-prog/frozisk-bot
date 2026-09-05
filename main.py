@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import random
+from datetime import date, timedelta
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
@@ -61,6 +62,7 @@ def main_menu():
                 InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo"),
                 InlineKeyboardButton(text="💰 Заработать голду", callback_data="earn_gold"),
             ],
+            [InlineKeyboardButton(text="🔥 Стрик", callback_data="streak")],
         ]
     )
 
@@ -163,9 +165,12 @@ async def cmd_stats(message: Message):
     if not is_admin(message.from_user.id):
         return
     s = db.stats()
+    cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
         f"📊 Статистика\n"
         f"Пользователей: {s['users']}\n"
+        f"Рефералов приведено: {s['total_referrals']}\n"
+        f"Общий баланс: {s['total_balance']:g} {cur}\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
         f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} "
         f"{db.get_setting('currency', config.CURRENCY)}\n"
@@ -275,6 +280,8 @@ async def cq_adm_stats(cb: CallbackQuery):
     await cb.message.edit_text(
         f"📊 Статистика\n"
         f"Пользователей: {s['users']}\n"
+        f"Рефералов приведено: {s['total_referrals']}\n"
+        f"Общий баланс: {s['total_balance']:g} {cur}\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
         f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} {cur}\n"
         f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}\n"
@@ -570,6 +577,8 @@ async def cq_adm_settings(cb: CallbackQuery):
                 [InlineKeyboardButton(text="🔫 Скин для вывода", callback_data="adm_set_skin")],
                 [InlineKeyboardButton(text=f"🎰 Шанс рулетки: {chance}%", callback_data="adm_set_roulette")],
                 [InlineKeyboardButton(text=f"🎲 Множитель рулетки: x{mult:g}", callback_data="adm_set_mult")],
+                [InlineKeyboardButton(text=f"🔥 Стрик 1-й день: {db.get_setting('streak_base', config.DEFAULT_STREAK_BASE)} {cur}", callback_data="adm_set_streak_base")],
+                [InlineKeyboardButton(text=f"🔥 Стрик прирост/день: +{db.get_setting('streak_step', config.DEFAULT_STREAK_STEP)} {cur}", callback_data="adm_set_streak_step")],
             ],
             "adm_main",
         ),
@@ -588,6 +597,8 @@ async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
         "adm_set_skin": "set_skin",
         "adm_set_roulette": "set_roulette",
         "adm_set_mult": "set_mult",
+        "adm_set_streak_base": "set_streak_base",
+        "adm_set_streak_step": "set_streak_step",
     }.get(cb.data)
     if not action:
         return
@@ -771,6 +782,14 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.set_setting("roulette_mult", value)
         await state.clear()
         await message.answer(f"🎲 Множитель рулетки: x{value:g}.")
+    elif action == "set_streak_base":
+        db.set_setting("streak_base", int(value))
+        await state.clear()
+        await message.answer(f"🔥 Стрик: награда за 1-й день — {int(value)} {cur}.")
+    elif action == "set_streak_step":
+        db.set_setting("streak_step", int(value))
+        await state.clear()
+        await message.answer(f"🔥 Стрик: прирост за день — +{int(value)} {cur}.")
     else:
         await state.clear()
         await message.answer("Действие устарело. Откройте /a заново.")
@@ -1107,6 +1126,49 @@ async def cq_earn_gold(cb: CallbackQuery):
     await cb.message.answer(
         "💰 Заработать голду\nПодпишитесь на каналы спонсоров и получите голду за подписку:",
         reply_markup=kb,
+    )
+
+
+@router.callback_query(F.data == "streak")
+async def cq_streak(cb: CallbackQuery):
+    await cb.answer()
+    cur = db.get_setting("currency", config.CURRENCY)
+    base = db.get_setting("streak_base", config.DEFAULT_STREAK_BASE)
+    step = db.get_setting("streak_step", config.DEFAULT_STREAK_STEP)
+    max_days = config.MAX_STREAK_DAYS
+
+    def reward(d):
+        d = min(d, max_days)
+        return base + (d - 1) * step
+
+    user = db.get_user(cb.from_user.id)
+    day = int(user.get("streak") or 0)
+    last_date = user.get("streak_date") or ""
+    today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    if last_date == today:
+        await cb.message.answer(
+            f"🔥 Вы уже получили награду за сегодня!\n"
+            f"Стрик: {day} дн.\n"
+            f"Завтра: +{reward(day + 1)} {cur}",
+            reply_markup=main_menu(),
+        )
+        return
+
+    if last_date == yesterday:
+        day += 1
+    else:
+        day = 1
+
+    got = reward(day)
+    db.update_streak(cb.from_user.id, day, today)
+    db.add_balance(cb.from_user.id, got)
+    await cb.message.answer(
+        f"🔥 Стрик: {day} день!\n"
+        f"Награда: +{got} {cur}\n\n"
+        f"Заходите завтра — получите +{reward(day + 1)} {cur}.",
+        reply_markup=main_menu(),
     )
 
 

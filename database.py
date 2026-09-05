@@ -25,10 +25,16 @@ def init():
                 first_name TEXT,
                 ref_id BIGINT,
                 balance DOUBLE PRECISION DEFAULT 0,
+                streak INTEGER DEFAULT 0,
+                streak_date TEXT,
                 created_at TEXT
             )
             """
         )
+        c.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS streak INTEGER DEFAULT 0"
+        )
+        c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_date TEXT")
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS withdrawals (
@@ -200,6 +206,16 @@ def set_balance(user_id, amount):
     conn.execute(
         "UPDATE users SET balance = %s WHERE id = %s",
         (max(float(amount), 0), user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_streak(user_id, days, last_date):
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET streak = %s, streak_date = %s WHERE id = %s",
+        (days, last_date, user_id),
     )
     conn.commit()
     conn.close()
@@ -386,11 +402,19 @@ def list_completions_rewarded():
 def stats():
     conn = connect()
     users = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
+    total_balance = conn.execute(
+        "SELECT COALESCE(SUM(balance), 0) AS s FROM users"
+    ).fetchone()["s"]
+    total_referrals = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM users WHERE ref_id IS NOT NULL AND ref_id != id"
+    ).fetchone()["cnt"]
     pending_wds = conn.execute(
         "SELECT COUNT(*) AS cnt FROM withdrawals WHERE status = 'pending'"
     ).fetchone()["cnt"]
     conn.close()
     return {
         "users": users,
+        "total_balance": total_balance,
+        "total_referrals": total_referrals,
         "pending_wds": pending_wds,
     }
