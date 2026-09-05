@@ -33,23 +33,33 @@ bot = None
 last_bet = {}
 promo_info = {}
 
+_moderation_cache = {}
+_MOD_CACHE_TTL = 20
+
 
 async def _moderation_blocked_async(from_user, block_muted):
     if not from_user:
         return False
     if is_admin(from_user.id):
         return False
+    uid = from_user.id
+    now = time.time()
+    cached = _moderation_cache.get(uid)
+    if cached and now - cached[0] < _MOD_CACHE_TTL:
+        banned, muted = cached[1], cached[2]
+        return banned or (block_muted and muted)
     try:
         user = await asyncio.wait_for(
-            asyncio.to_thread(db.get_user, from_user.id), timeout=5
+            asyncio.to_thread(db.get_user, uid), timeout=5
         )
     except Exception:
         return False
     if not user:
         return False
-    if user.get("banned"):
-        return True
-    if block_muted and user.get("muted"):
+    banned = bool(user.get("banned"))
+    muted = bool(user.get("muted"))
+    _moderation_cache[uid] = (now, banned, muted)
+    if banned or (block_muted and muted):
         return True
     return False
 
@@ -1107,6 +1117,7 @@ async def cmd_ban_unban(message: Message, command: CommandObject, banned: bool, 
         await message.answer("Пользователь не найден.")
         return
     db.set_ban(target, banned)
+    _moderation_cache.pop(target, None)
     await message.answer(
         f"🔨 Пользователь {target} забанен." if banned
         else f"✅ Пользователь {target} разбанен."
@@ -1125,6 +1136,7 @@ async def cmd_mute_unmute(message: Message, command: CommandObject, muted: bool,
         await message.answer("Пользователь не найден.")
         return
     db.set_mute(target, muted)
+    _moderation_cache.pop(target, None)
     await message.answer(
         f"🔇 Пользователь {target} замьючен." if muted
         else f"✅ Пользователь {target} размьючен."

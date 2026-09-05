@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 
 import config
@@ -17,13 +18,62 @@ def _dict_factory(cursor, row):
     return {cursor.description[i][0]: row[i] for i in range(len(row))}
 
 
+_pg_free = []
+_pg_lock = threading.Lock()
+_PG_MAX_IDLE = 8
+
+
+def _pg_connect():
+    return psycopg.connect(
+        config.DATABASE_URL,
+        row_factory=dict_row,
+        connect_timeout=15,
+    )
+
+
 def connect():
     if USE_PG:
-        return psycopg.connect(
-            config.DATABASE_URL,
-            row_factory=dict_row,
-            connect_timeout=10,
-        )
+        conn = None
+        with _pg_lock:
+            while _pg_free:
+                cand = _pg_free.pop()
+                if not cand.closed:
+                    conn = cand
+                    break
+        if conn is None:
+            conn = _pg_connect()
+        try:
+            conn.rollback()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = _pg_connect()
+
+        orig_close = conn.close
+
+        def _release():
+            try:
+                conn.rollback()
+            except Exception:
+                try:
+                    orig_close()
+                except Exception:
+                    pass
+                return
+            with _pg_lock:
+                if len(_pg_free) < _PG_MAX_IDLE:
+                    _pg_free.append(conn)
+                    return
+            try:
+                orig_close()
+            except Exception:
+                pass
+
+        conn.close = _release
+        return conn
+
     conn = sqlite3.connect(config.DATABASE_PATH)
     conn.row_factory = _dict_factory
     conn.execute("PRAGMA busy_timeout = 5000")
@@ -36,119 +86,65 @@ def _ensure_column(conn, table, column, decl):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
+def _pg_schema_ok(conn):
+    rows = conn.execute(
+        "SELECT table_name, string_agg(column_name, ',' ORDER BY column_name) AS cols "
+        "FROM information_schema.columns "
+        "WHERE table_schema = 'public' "
+        "GROUP BY table_name"
+    ).fetchall()
+    schema = {
+        "users": (
+            "banned", "balance", "created_at", "first_name", "id", "muted",
+            "promo_last_created", "ref_id", "roulette_wins", "streak",
+            "streak_date", "username",
+        ),
+        "withdrawals": (
+            "amount", "created_at", "details", "id", "screenshot", "skin",
+            "status", "user_id",
+        ),
+        "settings": ("key", "value"),
+        "promocodes": (
+            "amount", "code", "created_at", "max_uses", "owner_id", "used",
+            "used_at", "used_by",
+        ),
+        "promo_uses": ("activated_at", "code", "user_id"),
+        "tasks": ("active", "created_at", "id", "reward", "sponsor"),
+        "task_dones": ("created_at", "id", "rewarded", "task_id", "user_id"),
+    }
+    have = {r["table_name"]: (r["cols"] or "").split(",") for r in rows}
+    for table, cols in schema.items():
+        if table not in have or [c for c in cols if c not in have[table]]:
+            return False
+    return True
+
+
 def init():
-    conn = connect()
+    import time as _time
+
     if USE_PG:
-        with conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id BIGINT PRIMARY KEY,
-                    username TEXT,
-                    first_name TEXT,
-                    ref_id BIGINT,
-                    balance DOUBLE PRECISION DEFAULT 0,
-                    streak INTEGER DEFAULT 0,
-                    streak_date TEXT,
-                    roulette_wins INTEGER DEFAULT 0,
-                    promo_last_created BIGINT DEFAULT 0,
-                    banned BOOLEAN DEFAULT FALSE,
-                    muted BOOLEAN DEFAULT FALSE,
-                    created_at TEXT
+        for _attempt in range(5):
+            conn = connect()
+            try:
+                if _pg_schema_ok(conn):
+                    conn.close()
+                    return
+                conn.close()
+                raise RuntimeError(
+                    "PostgreSQL schema is incomplete; run the one-time "
+                    "schema creation (see README) before starting the bot."
                 )
-                """
-            )
-            conn.execute(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS streak INTEGER DEFAULT 0"
-            )
-            conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_date TEXT")
-            conn.execute(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS roulette_wins INTEGER DEFAULT 0"
-            )
-            conn.execute(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_last_created BIGINT DEFAULT 0"
-            )
-            conn.execute(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE"
-            )
-            conn.execute(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS muted BOOLEAN DEFAULT FALSE"
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS withdrawals (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    amount DOUBLE PRECISION,
-                    details TEXT,
-                    skin TEXT,
-                    screenshot TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS promocodes (
-                    code TEXT PRIMARY KEY,
-                    amount DOUBLE PRECISION,
-                    used INTEGER DEFAULT 0,
-                    max_uses INTEGER DEFAULT 1,
-                    owner_id BIGINT,
-                    used_by BIGINT,
-                    used_at TEXT,
-                    created_at TEXT
-                )
-                """
-            )
-            conn.execute(
-                "ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 1"
-            )
-            conn.execute(
-                "ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS owner_id BIGINT"
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS promo_uses (
-                    code TEXT,
-                    user_id BIGINT,
-                    activated_at TEXT,
-                    PRIMARY KEY (code, user_id)
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id SERIAL PRIMARY KEY,
-                    sponsor TEXT,
-                    reward DOUBLE PRECISION,
-                    active INTEGER DEFAULT 1,
-                    created_at TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS task_dones (
-                    id SERIAL PRIMARY KEY,
-                    task_id INTEGER,
-                    user_id BIGINT,
-                    rewarded INTEGER DEFAULT 1,
-                    created_at TEXT,
-                    UNIQUE(task_id, user_id)
-                )
-                """
-            )
+            except RuntimeError:
+                raise
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _time.sleep(2)
+        raise RuntimeError(
+            "init() failed: could not reach PostgreSQL to validate schema"
+        )
     else:
         conn.execute("PRAGMA journal_mode = WAL")
         with conn:
