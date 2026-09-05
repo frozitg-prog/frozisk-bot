@@ -540,6 +540,8 @@ async def cq_adm_settings(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     cur = db.get_setting("currency", config.CURRENCY)
+    chance = db.get_setting("roulette_chance", config.DEFAULT_ROULETTE_CHANCE)
+    mult = db.get_setting("roulette_mult", config.DEFAULT_ROULETTE_MULT)
     await cb.answer()
     await cb.message.edit_text(
         "⚙️ Настройки. Нажмите, чтобы изменить:",
