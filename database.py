@@ -408,6 +408,15 @@ def list_codes(limit=20):
     return rows
 
 
+def get_all_user_ids():
+    conn = connect()
+    rows = conn.execute("SELECT id FROM users").fetchall()
+    conn.close()
+    if not rows:
+        return []
+    return [row["id"] for row in rows]
+
+
 def add_task(sponsor, reward):
     conn = connect()
     cur = conn.execute(

@@ -28,6 +28,7 @@ logging.basicConfig(level=logging.INFO)
 router = Router()
 bot = None
 last_bet = {}
+promo_info = {}
 
 
 class Withdraw(StatesGroup):
@@ -631,6 +632,85 @@ async def cq_adm_code_uses(cb: CallbackQuery, state: FSMContext):
     )
 
 
+def promo_result_kb(code):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📤 Отправить промокод юзерам",
+                    callback_data=f"promo_send:{code}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Показать для копирования",
+                    callback_data=f"promo_copy:{code}",
+                )
+            ],
+            [InlineKeyboardButton(text="↩️ К промокодам", callback_data="adm_codes")],
+        ]
+    )
+
+
+@router.callback_query(F.data.startswith("promo_send:"))
+async def cq_promo_send(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    code = cb.data.split(":", 1)[1]
+    info = promo_info.get(code)
+    if not info:
+        await cb.answer("Информация о промокоде не найдена", show_alert=True)
+        return
+    amount, uses = info
+    cur = db.get_setting("currency", config.CURRENCY)
+    text = promo_code_text(code, amount, uses, cur)
+    users = db.get_all_user_ids()
+    sent = 0
+    for uid in users:
+        try:
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="📋 Копировать",
+                            url=f"tg://copy?text={code}",
+                        )
+                    ]
+                ]
+            )
+            await bot.send_message(uid, text, reply_markup=kb)
+            sent += 1
+        except Exception:
+            pass
+    await cb.answer()
+    await cb.message.edit_text(
+        f"📤 Промокод отправлен {sent} из {len(users)} пользователям.",
+        reply_markup=admin_sub_kb([], "adm_codes"),
+    )
+
+
+@router.callback_query(F.data.startswith("promo_copy:"))
+async def cq_promo_copy(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    code = cb.data.split(":", 1)[1]
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📋 Копировать",
+                    url=f"tg://copy?text={code}",
+                )
+            ]
+        ]
+    )
+    await cb.answer()
+    await cb.message.edit_text(
+        f"📋 Промокод (нажмите на код или кнопку, чтобы скопировать):\n<code>{code}</code>",
+        reply_markup=kb,
+    )
+
+
 @router.callback_query(F.data == "adm_tasks")
 async def cq_adm_tasks(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
@@ -855,6 +935,44 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.deactivate_task(int(num))
         await state.clear()
         await message.answer(f"Задание #{num} отключено.")
+        return
+
+    if action == "rand_amount":
+        r = parse_range(message.text)
+        if not r:
+            await message.answer("Введите диапазон в формате: <code>200-1000</code>")
+            return
+        await state.update_data(
+            ap_action="rand_uses",
+            rand_amount_lo=r[0],
+            rand_amount_hi=r[1],
+        )
+        await message.answer(
+            f"🎲 Диапазон голды: {fmt_num(r[0])}-{fmt_num(r[1])}.\n"
+            "Введите диапазон активаций, например: <code>1-5</code>"
+        )
+        return
+
+    if action == "rand_uses":
+        r = parse_range(message.text)
+        if not r:
+            await message.answer("Введите диапазон в формате: <code>1-5</code>")
+            return
+        try:
+            amount = random.randint(int(data["rand_amount_lo"]), int(data["rand_amount_hi"]))
+        except KeyError:
+            await message.answer("Сначала введите диапазон голды.")
+            return
+        uses = random.randint(int(r[0]), int(r[1]))
+        code = gen_promo_code()
+        db.add_code(code, amount, max_uses=uses)
+        promo_info[code] = (amount, uses)
+        cur = db.get_setting("currency", config.CURRENCY)
+        await state.clear()
+        await message.answer(
+            promo_code_text(code, amount, uses, cur),
+            reply_markup=promo_result_kb(code),
+        )
         return
 
     try:
