@@ -3,6 +3,7 @@ import logging
 import os
 import random
 import secrets
+import time
 from datetime import date, timedelta
 
 from aiohttp import web
@@ -914,6 +915,7 @@ async def cq_adm_settings(cb: CallbackQuery):
                 [InlineKeyboardButton(text=f"🔥 Стрик прирост/день: +{db.get_setting('streak_step', config.DEFAULT_STREAK_STEP)} {cur}", callback_data="adm_set_streak_step")],
                 [InlineKeyboardButton(text=f"🎁 Мин. сумма промо: {fmt_num(db.get_setting('promo_min_amount', config.DEFAULT_PROMO_MIN_AMOUNT))} {cur}", callback_data="adm_set_promo_min")],
                 [InlineKeyboardButton(text=f"🎁 Мин. активаций промо: {db.get_setting('promo_min_uses', config.DEFAULT_PROMO_MIN_USES)}", callback_data="adm_set_promo_uses")],
+                [InlineKeyboardButton(text=f"🎁 КД создания промо: {db.get_setting('promo_cd', config.DEFAULT_PROMO_CD)} сек", callback_data="adm_set_promo_cd")],
             ],
             "adm_main",
         ),
@@ -936,6 +938,7 @@ async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
         "adm_set_streak_step": "set_streak_step",
         "adm_set_promo_min": "set_promo_min",
         "adm_set_promo_uses": "set_promo_uses",
+        "adm_set_promo_cd": "set_promo_cd",
     }.get(cb.data)
     if not action:
         return
@@ -1181,6 +1184,15 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.set_setting("promo_min_uses", int(value))
         await state.clear()
         await message.answer(f"🎁 Мин. активаций промо: {int(value)}.")
+    elif action == "set_promo_cd":
+        cd = int(value)
+        if cd < 1:
+            cd = 1
+        elif cd > 3600:
+            cd = 3600
+        db.set_setting("promo_cd", cd)
+        await state.clear()
+        await message.answer(f"🎁 КД создания промо: {cd} сек (1 секунда — 1 час).")
     else:
         await state.clear()
         await message.answer("Действие устарело. Откройте /a заново.")
@@ -2070,6 +2082,13 @@ async def cq_promo_menu(cb: CallbackQuery):
 
 @router.callback_query(F.data == "create_promo")
 async def cq_create_promo(cb: CallbackQuery, state: FSMContext):
+    cd = int(db.get_setting("promo_cd", config.DEFAULT_PROMO_CD))
+    user = db.get_user(cb.from_user.id)
+    last = int(user.get("promo_last_created") or 0)
+    remaining = cd - (int(time.time()) - last)
+    if remaining > 0:
+        await cb.answer(f"⏳ Подождите {remaining} сек перед созданием промо", show_alert=True)
+        return
     await state.set_state(CreatePromo.code)
     min_amount = db.get_setting("promo_min_amount", config.DEFAULT_PROMO_MIN_AMOUNT)
     min_uses = db.get_setting("promo_min_uses", config.DEFAULT_PROMO_MIN_USES)
@@ -2169,6 +2188,7 @@ async def cq_create_promo_ok(cb: CallbackQuery, state: FSMContext):
         return
     db.spend_balance(cb.from_user.id, cost)
     db.add_code(data["cp_code"], data["cp_amount"], max_uses=int(data["cp_uses"]), owner_id=cb.from_user.id)
+    db.set_promo_last_created(cb.from_user.id, int(time.time()))
     promo_info[data["cp_code"]] = (data["cp_amount"], int(data["cp_uses"]), cb.from_user.id)
     await cb.answer()
     if is_admin(cb.from_user.id):

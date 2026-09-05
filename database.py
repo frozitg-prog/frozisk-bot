@@ -28,6 +28,7 @@ def init():
                 streak INTEGER DEFAULT 0,
                 streak_date TEXT,
                 roulette_wins INTEGER DEFAULT 0,
+                promo_last_created BIGINT DEFAULT 0,
                 created_at TEXT
             )
             """
@@ -38,6 +39,9 @@ def init():
         c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_date TEXT")
         c.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS roulette_wins INTEGER DEFAULT 0"
+        )
+        c.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_last_created BIGINT DEFAULT 0"
         )
         c.execute(
             """
@@ -419,6 +423,15 @@ def get_all_user_ids():
     if not rows:
         return []
     return [row["id"] for row in rows]
+
+
+def set_promo_last_created(user_id, ts):
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET promo_last_created = %s WHERE id = %s", (ts, user_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 def add_task(sponsor, reward):
