@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import random
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
@@ -44,12 +45,17 @@ class AdminPanel(StatesGroup):
     amount = State()
 
 
+class Roulette(StatesGroup):
+    bet = State()
+
+
 def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="👛 Мой баланс", callback_data="balance"),
                 InlineKeyboardButton(text="💸 Вывести", callback_data="start_withdraw"),
+                InlineKeyboardButton(text="🎰 Рулетка", callback_data="roulette"),
             ],
             [
                 InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo"),
@@ -560,6 +566,8 @@ async def cq_adm_settings(cb: CallbackQuery):
                     ),
                 ],
                 [InlineKeyboardButton(text="🔫 Скин для вывода", callback_data="adm_set_skin")],
+                [InlineKeyboardButton(text=f"🎰 Шанс рулетки: {chance}%", callback_data="adm_set_roulette")],
+                [InlineKeyboardButton(text=f"🎲 Множитель рулетки: x{mult:g}", callback_data="adm_set_mult")],
             ],
             "adm_main",
         ),
@@ -576,6 +584,8 @@ async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
         "adm_set_invite": "set_invite",
         "adm_set_currency": "set_currency",
         "adm_set_skin": "set_skin",
+        "adm_set_roulette": "set_roulette",
+        "adm_set_mult": "set_mult",
     }.get(cb.data)
     if not action:
         return
@@ -751,6 +761,14 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.set_setting("invite_bonus", int(value))
         await state.clear()
         await message.answer(f"👥 Бонус за реферальную ссылку: {int(value)} {cur}.")
+    elif action == "set_roulette":
+        db.set_setting("roulette_chance", int(value))
+        await state.clear()
+        await message.answer(f"🎰 Шанс победы в рулетке: {int(value)}%.")
+    elif action == "set_mult":
+        db.set_setting("roulette_mult", value)
+        await state.clear()
+        await message.answer(f"🎲 Множитель рулетки: x{value:g}.")
     else:
         await state.clear()
         await message.answer("Действие устарело. Откройте /a заново.")
@@ -1088,6 +1106,66 @@ async def cq_earn_gold(cb: CallbackQuery):
         "💰 Заработать голду\nПодпишитесь на каналы спонсоров и получите голду за подписку:",
         reply_markup=kb,
     )
+
+
+@router.callback_query(F.data == "roulette")
+async def cq_roulette(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    chance = db.get_setting("roulette_chance", config.DEFAULT_ROULETTE_CHANCE)
+    mult = db.get_setting("roulette_mult", config.DEFAULT_ROULETTE_MULT)
+    await state.set_state(Roulette.bet)
+    await cb.message.answer(
+        f"🎰 Рулетка\n"
+        f"Ставка: от {min_bet} {cur}\n"
+        f"Шанс победы: {chance}%\n"
+        f"Выигрыш: ставка ×{mult:g}\n\n"
+        f"Введите сумму ставки:"
+    )
+
+
+@router.message(Roulette.bet, F.text)
+async def roulette_bet(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    if amount < min_bet:
+        await message.answer(f"Минимальная ставка: {min_bet} {cur}.")
+        return
+    user = db.get_user(message.from_user.id)
+    if user["balance"] < amount:
+        await message.answer("На балансе недостаточно голды.")
+        return
+
+    chance = db.get_setting("roulette_chance", config.DEFAULT_ROULETTE_CHANCE)
+    mult = db.get_setting("roulette_mult", config.DEFAULT_ROULETTE_MULT)
+    win = random.randint(1, 100) <= int(chance)
+    await state.clear()
+
+    if not db.spend_balance(message.from_user.id, amount):
+        await message.answer("На балансе недостаточно голды.")
+        return
+
+    if win:
+        payout = amount * mult
+        db.add_balance(message.from_user.id, payout)
+        await message.answer(
+            f"🎉 Вы выиграли!\n"
+            f"Ставка: {amount:g} {cur}\n"
+            f"Выплата: +{payout:g} {cur} 💰\n\n"
+            f"Играйте ещё!", reply_markup=main_menu()
+        )
+    else:
+        await message.answer(
+            f"💸 Вы проиграли −{amount:g} {cur}.\n"
+            f"Не расстраивайтесь, попробуйте ещё раз!",
+            reply_markup=main_menu(),
+        )
 
 
 @router.callback_query(F.data.startswith("task_info:"))
