@@ -252,7 +252,7 @@ async def cmd_add_code(message: Message, command: CommandObject):
     code = args[0].upper()
     amount = int(args[1])
     max_uses = int(args[2]) if len(args) > 2 and args[2].isdigit() else 1
-    db.add_code(code, amount, max_uses=max_uses)
+    db.add_code(code, amount, max_uses=max_uses, owner_id=message.from_user.id)
     cur = db.get_setting("currency", config.CURRENCY)
     uses = "без лимита" if max_uses <= 0 else f"{max_uses} активаций"
     await message.answer(f"Промокод {code} создан на {fmt_num(amount)} {cur}. Активаций: {uses}.")
@@ -560,14 +560,28 @@ def parse_range(text):
     return lo, hi
 
 
-def promo_code_text(code, amount, uses, cur):
+def promo_code_text(code, amount, uses, cur, author=None):
     uses_s = "без лимита" if uses == 0 else f"{uses} активации"
-    return (
+    text = (
         f"🎁 НОВЫЙ ПРОМОКОД!\n"
         f"Награда: {fmt_num(amount)} {cur}\n"
         f"Активаций: {uses_s}\n"
         f"Код: <code>{code}</code>"
     )
+    if author:
+        text += f"\n👤 Автор: {author}"
+    return text
+
+
+def promo_author_name(owner_id):
+    if is_admin(owner_id):
+        return "Администрация"
+    user = db.get_user(owner_id)
+    if not user:
+        return f"ID {owner_id}"
+    if user.get("username"):
+        return f"@{user['username']}"
+    return user.get("first_name") or f"ID {owner_id}"
 
 
 @router.callback_query(F.data == "adm_codes_rand")
@@ -627,7 +641,7 @@ async def cq_adm_code_uses(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     await state.clear()
     cur = db.get_setting("currency", config.CURRENCY)
-    db.add_code(data["ap_code"], data["ap_code_amount"], max_uses=max_uses)
+    db.add_code(data["ap_code"], data["ap_code_amount"], max_uses=max_uses, owner_id=cb.from_user.id)
     uses = "без лимита (∞)" if max_uses <= 0 else f"{max_uses} активаций"
     await cb.answer()
     await cb.message.edit_text(
@@ -660,16 +674,26 @@ def promo_result_kb(code):
 @router.callback_query(F.data.startswith("promo_send:"))
 async def cq_promo_send(cb: CallbackQuery):
     code = cb.data.split(":", 1)[1]
+    row = db.get_code(code)
     info = promo_info.get(code)
-    if not info:
+    owner = None
+    if row and row.get("owner_id"):
+        owner = row["owner_id"]
+    elif info:
+        owner = info[2]
+    if not owner:
         await cb.answer("Информация о промокоде не найдена", show_alert=True)
         return
-    amount, uses, owner = info
     if not is_admin(cb.from_user.id) and owner != cb.from_user.id:
         await cb.answer("Нельзя отправить чужой промокод", show_alert=True)
         return
+    if row:
+        amount = row["amount"]
+        uses = row["max_uses"]
+    else:
+        amount, uses, _ = info
     cur = db.get_setting("currency", config.CURRENCY)
-    text = promo_code_text(code, amount, uses, cur)
+    text = promo_code_text(code, amount, uses, cur, author=promo_author_name(owner))
     users = db.get_all_user_ids()
     sent = 0
     for uid in users:
@@ -977,7 +1001,7 @@ async def adm_panel_amount(message: Message, state: FSMContext):
             return
         uses = random.randint(int(r[0]), int(r[1]))
         code = gen_promo_code()
-        db.add_code(code, amount, max_uses=uses)
+        db.add_code(code, amount, max_uses=uses, owner_id=message.from_user.id)
         promo_info[code] = (amount, uses, message.from_user.id)
         cur = db.get_setting("currency", config.CURRENCY)
         await state.clear()
@@ -2055,7 +2079,7 @@ async def cq_create_promo_ok(cb: CallbackQuery, state: FSMContext):
         await cb.answer("❌ Недостаточно голды на балансе!", show_alert=True)
         return
     db.spend_balance(cb.from_user.id, cost)
-    db.add_code(data["cp_code"], data["cp_amount"], max_uses=int(data["cp_uses"]))
+    db.add_code(data["cp_code"], data["cp_amount"], max_uses=int(data["cp_uses"]), owner_id=cb.from_user.id)
     promo_info[data["cp_code"]] = (data["cp_amount"], int(data["cp_uses"]), cb.from_user.id)
     await cb.answer()
     if is_admin(cb.from_user.id):

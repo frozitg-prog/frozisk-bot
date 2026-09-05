@@ -68,6 +68,7 @@ def init():
                 amount DOUBLE PRECISION,
                 used INTEGER DEFAULT 0,
                 max_uses INTEGER DEFAULT 1,
+                owner_id BIGINT,
                 used_by BIGINT,
                 used_at TEXT,
                 created_at TEXT
@@ -76,6 +77,9 @@ def init():
         )
         c.execute(
             "ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 1"
+        )
+        c.execute(
+            "ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS owner_id BIGINT"
         )
         c.execute(
             """
@@ -358,12 +362,12 @@ def list_user_withdrawals(user_id, limit=15):
     return rows
 
 
-def add_code(code, amount, max_uses=1):
+def add_code(code, amount, max_uses=1, owner_id=None):
     conn = connect()
     conn.execute(
-        "INSERT INTO promocodes (code, amount, max_uses, created_at) VALUES (%s, %s, %s, %s) "
-        "ON CONFLICT (code) DO NOTHING",
-        (code, amount, max_uses, datetime.now().isoformat()),
+        "INSERT INTO promocodes (code, amount, max_uses, owner_id, created_at) "
+        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (code) DO NOTHING",
+        (code, amount, max_uses, owner_id, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
