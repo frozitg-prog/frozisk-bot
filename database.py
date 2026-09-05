@@ -379,12 +379,20 @@ def add_roulette_win(user_id):
     conn.close()
 
 
+def _admin_filter():
+    if not config.ADMIN_IDS:
+        return "", ()
+    ph = ", ".join(_PH for _ in config.ADMIN_IDS)
+    return f" AND id NOT IN ({ph}) ", tuple(config.ADMIN_IDS)
+
+
 def top_balance(limit=10):
     conn = connect()
+    adm_sql, adm_params = _admin_filter()
     rows = conn.execute(
         f"SELECT id, username, first_name, balance FROM users "
-        f"WHERE balance > 0 ORDER BY balance DESC LIMIT {_PH}",
-        (limit,),
+        f"WHERE balance > 0 {adm_sql}ORDER BY balance DESC LIMIT {_PH}",
+        adm_params + (limit,),
     ).fetchall()
     conn.close()
     return rows
@@ -392,12 +400,13 @@ def top_balance(limit=10):
 
 def top_referrals(limit=10):
     conn = connect()
+    adm_sql, adm_params = _admin_filter()
     rows = conn.execute(
         f"SELECT u.id, u.username, u.first_name, COUNT(*) AS refs "
         f"FROM users u JOIN users r ON r.ref_id = u.id "
-        f"WHERE r.ref_id != r.id "
+        f"WHERE r.ref_id != r.id {adm_sql} "
         f"GROUP BY u.id ORDER BY refs DESC LIMIT {_PH}",
-        (limit,),
+        adm_params + (limit,),
     ).fetchall()
     conn.close()
     return rows
@@ -405,10 +414,11 @@ def top_referrals(limit=10):
 
 def top_roulette(limit=10):
     conn = connect()
+    adm_sql, adm_params = _admin_filter()
     rows = conn.execute(
         f"SELECT id, username, first_name, roulette_wins FROM users "
-        f"WHERE roulette_wins > 0 ORDER BY roulette_wins DESC LIMIT {_PH}",
-        (limit,),
+        f"WHERE roulette_wins > 0 {adm_sql}ORDER BY roulette_wins DESC LIMIT {_PH}",
+        adm_params + (limit,),
     ).fetchall()
     conn.close()
     return rows

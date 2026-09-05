@@ -36,6 +36,19 @@ promo_info = {}
 _moderation_cache = {}
 _MOD_CACHE_TTL = 20
 
+_active_fc = None
+_FC_TTL = 600
+
+
+async def _fc_cancel_task(task):
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
 
 async def _moderation_blocked_async(from_user, block_muted):
     if not from_user:
@@ -377,6 +390,173 @@ async def cmd_codes(message: Message):
         state = "✅ использован" if total != 0 and r["used"] >= total else f"🆕 {r['used']}/{total}"
         lines.append(f"{r['code']} — {fmt_num(r['amount'])} {cur} — {state}")
     await message.answer("🎁 Промокоды:\n" + "\n".join(lines))
+
+
+_FC_LINK_ERROR = (
+    "Бот не может найти чат комментариев этого канала. "
+    "Включите комментарии у канала и добавьте бота админом туда."
+)
+
+
+async def _parse_fc_amount(raw):
+    raw = (raw or "").strip().replace(",", ".")
+    try:
+        amount = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if amount <= 0:
+        return None
+    return amount
+
+
+async def _fc_resolve_channel(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        if value.lstrip("-").isdigit():
+            chat = await bot.get_chat(int(value))
+        else:
+            chat = await bot.get_chat(value)
+    except Exception:
+        return None
+    if chat.type != "channel":
+        return None
+    return chat.id
+
+
+async def _fc_post(path, amount):
+    global _active_fc
+    if _active_fc:
+        old = _active_fc
+        await _fc_cancel_task(old.get("task"))
+        _active_fc = None
+        try:
+            await bot.send_message(
+                old["group_id"],
+                "⏹️ Раздача отменена — запущена новая.",
+                message_thread_id=old["post_id"],
+            )
+        except Exception:
+            pass
+
+    cur = db.get_setting("currency", config.CURRENCY)
+    announced = await bot.send_message(
+        path,
+        f"🤑 ФАСТ-КОММЕНТ\n\n"
+        f"Напишите первым комментарий под этим постом "
+        f"и получите <b>{fmt_num(amount)} {cur}</b>\n\n"
+        f"⏳ Кто успеет первым — того и награда!",
+    )
+    post_id = announced.message_id
+    try:
+        chat = await bot.get_chat(path)
+        group_id = chat.linked_chat_id
+    except Exception:
+        group_id = None
+    if not group_id:
+        try:
+            await bot.edit_message_text(
+                path, post_id, f"⚠️ {_FC_LINK_ERROR}"
+            )
+        except Exception:
+            pass
+        return False
+
+    _active_fc = {
+        "channel_id": path,
+        "group_id": group_id,
+        "post_id": post_id,
+        "amount": amount,
+        "started": time.time(),
+    }
+
+    async def _expire():
+        await asyncio.sleep(_FC_TTL)
+        global _active_fc
+        fc = _active_fc
+        if fc and fc is not None and fc.get("post_id") == post_id and fc.get("amount") == amount:
+            _active_fc = None
+            try:
+                await bot.send_message(
+                    group_id,
+                    "⏰ Время вышло — никто не успел написать первым. Повторим?",
+                    message_thread_id=post_id,
+                )
+            except Exception:
+                pass
+
+    _active_fc["task"] = asyncio.create_task(_expire())
+    return True
+
+
+@router.message(Command("fc"))
+async def cmd_fc(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    amount = await _parse_fc_amount(command.args)
+    if amount is None:
+        await message.answer("Использование: /fc <сумма голды>")
+        return
+
+    if message.chat.type == "channel":
+        channel = message.chat.id
+        db.set_setting("fc_channel_id", channel)
+    else:
+        channel = db.get_setting("fc_channel_id")
+        if not channel:
+            await message.answer(
+                "Канал не настроен. Укажите его: /fc_set <id или @канал> "
+                "(либо запустите /fc прямо в канале)"
+            )
+            return
+        channel = int(channel)
+
+    if await _fc_post(channel, amount):
+        cur = db.get_setting("currency", config.CURRENCY)
+        await message.answer(
+            f"🚀 Фаст-коммент запущен! Первый комментарий под постом получит "
+            f"{fmt_num(amount)} {cur}."
+        )
+    else:
+        await message.answer(_FC_LINK_ERROR)
+
+
+@router.message(Command("fc_set"))
+async def cmd_fc_set(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    channel = await _fc_resolve_channel(command.args)
+    if channel is None:
+        await message.answer(
+            "Не удалось найти канал. Укажите @ник или id канала, "
+            "в котором бот является админом."
+        )
+        return
+    db.set_setting("fc_channel_id", channel)
+    await message.answer("Канал для фаст-комментов сохранён.")
+
+
+@router.message(Command("fc_cancel"))
+async def cmd_fc_cancel(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    global _active_fc
+    if not _active_fc:
+        await message.answer("Активной раздачи нет.")
+        return
+    fc = _active_fc
+    _active_fc = None
+    await _fc_cancel_task(fc.get("task"))
+    try:
+        await bot.send_message(
+            fc["group_id"],
+            "⏹️ Раздача отменена.",
+            message_thread_id=fc["post_id"],
+        )
+    except Exception:
+        pass
+    await message.answer("Фаст-коммент отменён.")
 
 
 @router.message(Command("set_currency"))
@@ -2435,6 +2615,71 @@ async def run_http():
     port = int(os.getenv("PORT", "8080"))
     await web.TCPSite(runner, "0.0.0.0", port).start()
     logging.info("HTTP server on port %s", port)
+
+
+@router.message()
+async def fc_waiter(message: Message):
+    global _active_fc
+    fc = _active_fc
+    if fc is None:
+        return
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if fc["group_id"] != message.chat.id:
+        return
+    if getattr(message, "message_thread_id", None) != fc["post_id"]:
+        return
+    if not message.from_user or message.from_user.is_bot:
+        return
+    if is_admin(message.from_user.id):
+        return
+
+    if _active_fc is not fc:
+        return
+    _active_fc = None
+    await _fc_cancel_task(fc.get("task"))
+
+    winner = message.from_user
+    try:
+        db.add_balance(winner.id, fc["amount"])
+    except Exception:
+        try:
+            await bot.send_message(
+                fc["group_id"],
+                "⚠️ Не удалось начислить голду — напишите админу.",
+                message_thread_id=fc["post_id"],
+            )
+        except Exception:
+            pass
+        return
+
+    cur = db.get_setting("currency", config.CURRENCY)
+    nick = f"@{winner.username}" if winner.username else winner.first_name
+    try:
+        await bot.send_message(
+            fc["group_id"],
+            f"🥇 {nick} написал первым и забирает "
+            f"<b>{fmt_num(fc['amount'])} {cur}</b>!\n\n📣 Победитель — {nick}!",
+            message_thread_id=fc["post_id"],
+        )
+    except Exception:
+        pass
+    try:
+        await bot.send_message(
+            fc["channel_id"],
+            f"🏆 Победитель фаст-коммента: {nick}\n"
+            f"Начислено: {fmt_num(fc['amount'])} {cur}",
+        )
+    except Exception:
+        pass
+    try:
+        await bot.send_message(
+            winner.id,
+            f"🎉 Вы написали первым под постом фаст-коммента!\n"
+            f"Начислено: +{fmt_num(fc['amount'])} {cur}",
+        )
+    except Exception:
+        pass
 
 
 async def main():
