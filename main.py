@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import random
+import secrets
 from datetime import date, timedelta
 
 from aiohttp import web
@@ -181,7 +182,7 @@ async def cmd_start(message: Message, command: CommandObject):
             await bot.send_message(
                 ref_id,
                 f"🎉 По вашей реферальной ссылке пришёл новый пользователь!\n"
-                f"Начислено: +{reward} {db.get_setting('currency', config.CURRENCY)}",
+                f"Начислено: +{fmt_num(reward)} {db.get_setting('currency', config.CURRENCY)}",
             )
 
     bonus = ""
@@ -191,7 +192,7 @@ async def cmd_start(message: Message, command: CommandObject):
             db.add_balance(user.id, invite_bonus)
             bonus = (
                 f"\n🎁 Бонус за переход по реферальной ссылке: "
-                f"+{invite_bonus} {db.get_setting('currency', config.CURRENCY)} зачислены на баланс!"
+                f"+{fmt_num(invite_bonus)} {db.get_setting('currency', config.CURRENCY)} зачислены на баланс!"
             )
 
     await message.answer(
@@ -214,9 +215,9 @@ async def cmd_stats(message: Message):
         f"Рефералов приведено: {s['total_referrals']}\n"
         f"Общий баланс: {fmt_num(s['total_balance'])} {cur}\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
-        f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} "
+        f"Награда за вступление: {fmt_num(db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN))} "
         f"{db.get_setting('currency', config.CURRENCY)}\n"
-        f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} "
+        f"Мин. вывод: {fmt_num(db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW))} "
         f"{db.get_setting('currency', config.CURRENCY)}"
     )
 
@@ -248,7 +249,7 @@ async def cmd_add_code(message: Message, command: CommandObject):
     db.add_code(code, amount, max_uses=max_uses)
     cur = db.get_setting("currency", config.CURRENCY)
     uses = "без лимита" if max_uses <= 0 else f"{max_uses} активаций"
-    await message.answer(f"Промокод {code} создан на {amount} {cur}. Активаций: {uses}.")
+    await message.answer(f"Промокод {code} создан на {fmt_num(amount)} {cur}. Активаций: {uses}.")
 
 
 @router.message(Command("codes"))
@@ -325,8 +326,8 @@ async def cq_adm_stats(cb: CallbackQuery):
         f"Рефералов приведено: {s['total_referrals']}\n"
         f"Общий баланс: {fmt_num(s['total_balance'])} {cur}\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
-        f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} {cur}\n"
-        f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}\n"
+        f"Награда за вступление: {fmt_num(db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN))} {cur}\n"
+        f"Мин. вывод: {fmt_num(db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW))} {cur}\n"
         f"Валюта: {cur}\n"
         f"Скин для вывода: {db.get_setting('withdraw_skin', config.DEFAULT_SKIN)}",
         reply_markup=admin_sub_kb([], "adm_main"),
@@ -528,9 +529,51 @@ async def cq_adm_codes(cb: CallbackQuery):
                     InlineKeyboardButton(text="📋 Список", callback_data="adm_codes_list"),
                     InlineKeyboardButton(text="➕ Создать", callback_data="adm_codes_add"),
                 ],
+                [InlineKeyboardButton(text="🎲 Рандомный промокод", callback_data="adm_codes_rand")],
             ],
             "adm_main",
         ),
+    )
+
+
+def gen_promo_code(length=8):
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(chars) for _ in range(length))
+
+
+def parse_range(text):
+    import re
+
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*[-—-]\s*(\d+(?:[.,]\d+)?)", text)
+    if not m:
+        return None
+    lo = float(m.group(1).replace(",", "."))
+    hi = float(m.group(2).replace(",", "."))
+    if lo > hi:
+        lo, hi = hi, lo
+    return lo, hi
+
+
+def promo_code_text(code, amount, uses, cur):
+    uses_s = "без лимита" if uses == 0 else f"{uses} активации"
+    return (
+        f"🎁 НОВЫЙ ПРОМОКОД!\n"
+        f"Награда: {fmt_num(amount)} {cur}\n"
+        f"Активаций: {uses_s}\n"
+        f"Код: <code>{code}</code>"
+    )
+
+
+@router.callback_query(F.data == "adm_codes_rand")
+async def cq_adm_codes_rand(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminPanel.amount)
+    await state.update_data(ap_action="rand_amount")
+    await cb.answer()
+    await cb.message.edit_text(
+        "🎲 Рандомный промокод.\n"
+        "Введите диапазон голды, например: <code>200-1000</code>"
     )
 
 
@@ -582,7 +625,7 @@ async def cq_adm_code_uses(cb: CallbackQuery, state: FSMContext):
     uses = "без лимита (∞)" if max_uses <= 0 else f"{max_uses} активаций"
     await cb.answer()
     await cb.message.edit_text(
-        f"🎁 Промокод {data['ap_code']} создан на {data['ap_code_amount']} {cur}.\n"
+        f"🎁 Промокод {data['ap_code']} создан на {fmt_num(data['ap_code_amount'])} {cur}.\n"
         f"Активаций: {uses}.",
         reply_markup=admin_sub_kb([], "adm_codes"),
     )
@@ -620,7 +663,7 @@ async def cq_adm_tasks_list(cb: CallbackQuery):
     lines = []
     for t in rows:
         state = "🟢 активно" if t["active"] else "🔴 отключено"
-        lines.append(f"#{t['id']} @{t['sponsor']} — {t['reward']} {cur} — {state}")
+        lines.append(f"#{t['id']} @{t['sponsor']} — {fmt_num(t['reward'])} {cur} — {state}")
     await cb.answer()
     await cb.message.edit_text(
         "📢 Задания:\n" + "\n".join(lines),
@@ -666,7 +709,7 @@ async def cq_adm_settings(cb: CallbackQuery):
                         callback_data="adm_set_minwd",
                     ),
                     InlineKeyboardButton(
-                        text=f"🎁 За вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} {cur}",
+                        text=f"🎁 За вступление: {fmt_num(db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN))} {cur}",
                         callback_data="adm_set_join",
                     ),
                 ],
@@ -746,7 +789,7 @@ async def adm_panel_target(message: Message, state: FSMContext):
             f"ID: {user['id']}\n"
             f"Имя: {user['first_name']}\n"
             f"Ник: {username}\n"
-            f"Баланс: {user['balance']} {cur}\n"
+f"Баланс: {fmt_num(user['balance'])} {cur}\n"
             f"Пригласил: {referrals} чел.\n"
             f"Пришёл по реф.: {user['ref_id'] if user['ref_id'] else '—'}\n"
             f"🔗 {link}\n"
@@ -944,7 +987,7 @@ async def cmd_userbalance(message: Message, command: CommandObject):
         f"ID: {user['id']}\n"
         f"Имя: {user['first_name']}\n"
         f"Ник: {username}\n"
-        f"Баланс: {user['balance']} {cur}\n"
+        f"Баланс: {fmt_num(user['balance'])} {cur}\n"
         f"Пригласил: {referrals} чел.\n"
         f"Пришёл по реф.: {user['ref_id'] if user['ref_id'] else '—'}\n"
         f"🔗 {link}\n"
@@ -985,8 +1028,8 @@ async def admin_balance_amount(message: Message, state: FSMContext):
     cur = db.get_setting("currency", config.CURRENCY)
     await state.clear()
     await message.answer(
-        f"➕ Начислено +{amount} {cur} пользователю {user['first_name'] if user else target} "
-        f"(ID {target}).\nТекущий баланс: {user['balance'] + amount} {cur}."
+        f"➕ Начислено +{fmt_num(amount)} {cur} пользователю {user['first_name'] if user else target} "
+        f"(ID {target}).\nТекущий баланс: {fmt_num(user['balance'] + amount)} {cur}."
     )
 
 
@@ -1070,7 +1113,7 @@ async def cmd_addbal(message: Message, command: CommandObject):
     db.add_balance(user["id"], int(args[1]))
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
-        f"Начислено +{args[1]} {cur} пользователю {user['first_name']}"
+        f"Начислено +{fmt_num(args[1])} {cur} пользователю {user['first_name']}"
         f" (@{user['username'] or user['id']})."
     )
 
@@ -1090,7 +1133,7 @@ async def cmd_subbal(message: Message, command: CommandObject):
     db.spend_balance(user["id"], int(args[1]))
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
-        f"Списано −{args[1]} {cur} у пользователя {user['first_name']}"
+        f"Списано −{fmt_num(args[1])} {cur} у пользователя {user['first_name']}"
         f" (@{user['username'] or user['id']})."
     )
 
@@ -1172,7 +1215,7 @@ async def cmd_add_task(message: Message, command: CommandObject):
     task_id = db.add_task(sponsor, reward)
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
-        f"Задание #{task_id} создано: подписка на @{sponsor} = {reward} {cur}.\n"
+        f"Задание #{task_id} создано: подписка на @{sponsor} = {fmt_num(reward)} {cur}.\n"
         "Не забудь добавить бота в этот канал/чат."
     )
 
@@ -1189,7 +1232,7 @@ async def cmd_tasks(message: Message):
     lines = []
     for t in rows:
         state = "🟢 активно" if t["active"] else "🔴 отключено"
-        lines.append(f"#{t['id']} @{t['sponsor']} — {t['reward']} {cur} — {state}")
+        lines.append(f"#{t['id']} @{t['sponsor']} — {fmt_num(t['reward'])} {cur} — {state}")
     await message.answer("📢 Задания:\n" + "\n".join(lines))
 
 
@@ -1265,7 +1308,7 @@ async def cq_streak(cb: CallbackQuery):
         await cb.message.answer(
             f"🔥 Вы уже получили награду за сегодня!\n"
             f"Стрик: {day} дн.\n"
-            f"Завтра: +{reward(day + 1)} {cur}",
+            f"Завтра: +{fmt_num(reward(day + 1))} {cur}",
             reply_markup=main_menu(),
         )
         return
@@ -1280,8 +1323,8 @@ async def cq_streak(cb: CallbackQuery):
     db.add_balance(cb.from_user.id, got)
     await cb.message.answer(
         f"🔥 Стрик: {day} день!\n"
-        f"Награда: +{got} {cur}\n\n"
-        f"Заходите завтра — получите +{reward(day + 1)} {cur}.",
+        f"Награда: +{fmt_num(got)} {cur}\n\n"
+        f"Заходите завтра — получите +{fmt_num(reward(day + 1))} {cur}.",
         reply_markup=main_menu(),
     )
 
@@ -1296,7 +1339,7 @@ async def cq_roulette(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Roulette.bet)
     await cb.message.answer(
         f"🎰 Рулетка\n"
-        f"Ставка: от {min_bet} {cur}\n"
+        f"Ставка: от {fmt_num(min_bet)} {cur}\n"
         f"Шанс победы: {chance}%\n"
         f"Выигрыш: ставка ×{fmt_num(mult)}\n\n"
         f"Введите сумму ставки:"
@@ -1313,7 +1356,7 @@ async def roulette_bet(message: Message, state: FSMContext):
     cur = db.get_setting("currency", config.CURRENCY)
     min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
     if amount < min_bet:
-        await message.answer(f"Минимальная ставка: {min_bet} {cur}.")
+        await message.answer(f"Минимальная ставка: {fmt_num(min_bet)} {cur}.")
         return
     user = db.get_user(message.from_user.id)
     if user["balance"] < amount:
@@ -1474,7 +1517,7 @@ async def cq_task_info(cb: CallbackQuery):
     await cb.message.edit_text(
         f"Задание #{task['id']}\n"
         f"Подпишитесь на канал: @{task['sponsor']}\n"
-        f"Награда: {task['reward']} {cur}\n\n"
+        f"Награда: {fmt_num(task['reward'])} {cur}\n\n"
         "После подписки нажмите «Проверить подписку».",
         reply_markup=kb,
     )
@@ -1534,7 +1577,7 @@ async def cq_task_check(cb: CallbackQuery):
     db.add_completion(task_id, user_id)
     db.set_completion_rewarded(task_id, user_id, True)
     await cb.message.answer(
-        f"🎉 Подписка подтверждена! Начислено: +{task['reward']} {cur}.",
+        f"🎉 Подписка подтверждена! Начислено: +{fmt_num(task['reward'])} {cur}.",
         reply_markup=main_menu(),
     )
 
