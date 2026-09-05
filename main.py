@@ -56,6 +56,10 @@ class AdminPanel(StatesGroup):
     amount = State()
 
 
+class Post(StatesGroup):
+    text = State()
+
+
 class Roulette(StatesGroup):
     bet = State()
 
@@ -255,6 +259,29 @@ async def cmd_stats(message: Message):
         f"Мин. вывод: {fmt_num(db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW))} "
         f"{db.get_setting('currency', config.CURRENCY)}"
     )
+
+
+@router.message(Command("post"))
+async def cmd_post(message: Message, command: CommandObject, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    text = command.args
+    if text:
+        await state.clear()
+        await broadcast_to_all(text)
+        await message.answer(f"📣 Сообщение отправлено всем пользователям.")
+        return
+    await state.set_state(Post.text)
+    await message.answer("Введите текст для рассылки (или отправьте одним сообщением):")
+
+
+@router.message(Post.text, F.text)
+async def post_text(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await broadcast_to_all(message.text)
+    await message.answer("📣 Сообщение отправлено всем пользователям.")
 
 
 @router.message(Command("set_join"))
@@ -602,6 +629,18 @@ def promo_code_text(code, amount, uses, cur, author=None):
     return text
 
 
+async def broadcast_to_all(text):
+    users = db.get_all_user_ids()
+    sent = 0
+    for uid in users:
+        try:
+            await bot.send_message(uid, text)
+            sent += 1
+        except Exception:
+            pass
+    return sent
+
+
 def promo_author_name(owner_id):
     if is_admin(owner_id):
         return "Администрация"
@@ -873,6 +912,8 @@ async def cq_adm_settings(cb: CallbackQuery):
                 [InlineKeyboardButton(text=f"🎲 Множитель рулетки: x{fmt_num(mult)}", callback_data="adm_set_mult")],
                 [InlineKeyboardButton(text=f"🔥 Стрик 1-й день: {db.get_setting('streak_base', config.DEFAULT_STREAK_BASE)} {cur}", callback_data="adm_set_streak_base")],
                 [InlineKeyboardButton(text=f"🔥 Стрик прирост/день: +{db.get_setting('streak_step', config.DEFAULT_STREAK_STEP)} {cur}", callback_data="adm_set_streak_step")],
+                [InlineKeyboardButton(text=f"🎁 Мин. сумма промо: {fmt_num(db.get_setting('promo_min_amount', config.DEFAULT_PROMO_MIN_AMOUNT))} {cur}", callback_data="adm_set_promo_min")],
+                [InlineKeyboardButton(text=f"🎁 Мин. активаций промо: {db.get_setting('promo_min_uses', config.DEFAULT_PROMO_MIN_USES)}", callback_data="adm_set_promo_uses")],
             ],
             "adm_main",
         ),
@@ -893,6 +934,8 @@ async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
         "adm_set_mult": "set_mult",
         "adm_set_streak_base": "set_streak_base",
         "adm_set_streak_step": "set_streak_step",
+        "adm_set_promo_min": "set_promo_min",
+        "adm_set_promo_uses": "set_promo_uses",
     }.get(cb.data)
     if not action:
         return
@@ -1130,6 +1173,14 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.set_setting("streak_step", int(value))
         await state.clear()
         await message.answer(f"🔥 Стрик: прирост за день — +{int(value)} {cur}.")
+    elif action == "set_promo_min":
+        db.set_setting("promo_min_amount", int(value))
+        await state.clear()
+        await message.answer(f"🎁 Мин. сумма одной активации промо: {int(value)} {cur}.")
+    elif action == "set_promo_uses":
+        db.set_setting("promo_min_uses", int(value))
+        await state.clear()
+        await message.answer(f"🎁 Мин. активаций промо: {int(value)}.")
     else:
         await state.clear()
         await message.answer("Действие устарело. Откройте /a заново.")
@@ -2020,9 +2071,14 @@ async def cq_promo_menu(cb: CallbackQuery):
 @router.callback_query(F.data == "create_promo")
 async def cq_create_promo(cb: CallbackQuery, state: FSMContext):
     await state.set_state(CreatePromo.code)
+    min_amount = db.get_setting("promo_min_amount", config.DEFAULT_PROMO_MIN_AMOUNT)
+    min_uses = db.get_setting("promo_min_uses", config.DEFAULT_PROMO_MIN_USES)
+    cur = db.get_setting("currency", config.CURRENCY)
     await cb.answer()
     await cb.message.answer(
         "🛠 Создание своего промокода.\n"
+        f"Мин. сумма одной активации: {fmt_num(min_amount)} {cur}\n"
+        f"Мин. активаций: {min_uses}\n"
         "С вас спишется: награда × количество активаций.\n\n"
         "Введите код (латиницей и цифрами, например: <code>MYGIFT</code>):"
     )
@@ -2051,20 +2107,24 @@ async def cp_amount(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("Введите число.")
         return
-    if amount <= 0:
-        await message.answer("Количество голды должно быть больше нуля.")
+    min_amount = db.get_setting("promo_min_amount", config.DEFAULT_PROMO_MIN_AMOUNT)
+    cur = db.get_setting("currency", config.CURRENCY)
+    if amount < min_amount:
+        await message.answer(f"Минимум: {fmt_num(min_amount)} {cur} за одну активацию.")
         return
     await state.update_data(cp_amount=amount)
     await state.set_state(CreatePromo.uses)
-    await message.answer("Введите количество активаций:")
+    min_uses = db.get_setting("promo_min_uses", config.DEFAULT_PROMO_MIN_USES)
+    await message.answer(f"Введите количество активаций (минимум {min_uses}):")
     return
 
 
 @router.message(CreatePromo.uses, F.text)
 async def cp_uses(message: Message, state: FSMContext):
     text = message.text.strip()
-    if not text.isdigit() or int(text) < 2:
-        await message.answer("Минимум 2 активации. Введите число от 2:")
+    min_uses = db.get_setting("promo_min_uses", config.DEFAULT_PROMO_MIN_USES)
+    if not text.isdigit() or int(text) < min_uses:
+        await message.answer(f"Минимум активаций: {min_uses}. Введите число от {min_uses}:")
         return
     uses = int(text)
     data = await state.get_data()
