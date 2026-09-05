@@ -50,7 +50,10 @@ def main_menu():
                 InlineKeyboardButton(text="👛 Мой баланс", callback_data="balance"),
                 InlineKeyboardButton(text="💸 Вывести", callback_data="start_withdraw"),
             ],
-            [InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo")],
+            [
+                InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo"),
+                InlineKeyboardButton(text="💰 Заработать голду", callback_data="earn_gold"),
+            ],
         ]
     )
 
@@ -114,9 +117,20 @@ async def cmd_start(message: Message, command: CommandObject):
                 f"Начислено: +{reward} {db.get_setting('currency', config.CURRENCY)}",
             )
 
+    bonus = ""
+    if is_new and ref_id:
+        invite_bonus = db.get_setting("invite_bonus", 777)
+        if invite_bonus and invite_bonus > 0:
+            db.add_balance(user.id, invite_bonus)
+            bonus = (
+                f"\n🎁 Бонус за переход по реферальной ссылке: "
+                f"+{invite_bonus} {db.get_setting('currency', config.CURRENCY)} зачислены на баланс!"
+            )
+
     await message.answer(
         f"Привет, {user.first_name}!\n"
-        "Оставляйте заявки, зарабатывайте валюту за приглашённых и выводите её.",
+        "Оставляйте заявки, зарабатывайте валюту за приглашённых и выводите её."
+        f"{bonus}",
         reply_markup=main_menu(),
     )
 
@@ -344,6 +358,212 @@ async def cmd_withdraw(message: Message, command: CommandObject):
         )
     else:
         await message.answer(format_wd(wd), reply_markup=wd_kb)
+
+
+@router.message(Command("add_task"))
+async def cmd_add_task(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if len(args) != 2 or not args[1].isdigit():
+        await message.answer("Использование: /add_task <@канал> <количество G>")
+        return
+    sponsor = args[0].lstrip("@")
+    reward = int(args[1])
+    task_id = db.add_task(sponsor, reward)
+    cur = db.get_setting("currency", config.CURRENCY)
+    await message.answer(
+        f"Задание #{task_id} создано: подписка на @{sponsor} = {reward} {cur}.\n"
+        "Не забудь добавить бота в этот канал/чат."
+    )
+
+
+@router.message(Command("tasks"))
+async def cmd_tasks(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    rows = db.list_tasks(active=None)
+    if not rows:
+        await message.answer("Заданий нет. Создайте: /add_task <@канал> <G>")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    lines = []
+    for t in rows:
+        state = "🟢 активно" if t["active"] else "🔴 отключено"
+        lines.append(f"#{t['id']} @{t['sponsor']} — {t['reward']} {cur} — {state}")
+    await message.answer("📢 Задания:\n" + "\n".join(lines))
+
+
+@router.message(Command("del_task"))
+async def cmd_del_task(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args or not command.args.isdigit():
+        await message.answer("Использование: /del_task <номер задания>")
+        return
+    task = db.get_task(int(command.args))
+    if not task:
+        await message.answer("Задание не найдено.")
+        return
+    db.deactivate_task(int(command.args))
+    await message.answer(f"Задание #{command.args} отключено.")
+
+
+@router.message(Command("set_invite"))
+async def cmd_set_invite(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args or not command.args.isdigit():
+        await message.answer("Использование: /set_invite <количество G>")
+        return
+    db.set_setting("invite_bonus", int(command.args))
+    cur = db.get_setting("currency", config.CURRENCY)
+    await message.answer(f"Бонус за реферальную ссылку установлен: {command.args} {cur}.")
+
+
+@router.callback_query(F.data == "earn_gold")
+async def cq_earn_gold(cb: CallbackQuery):
+    await cb.answer()
+    tasks = db.list_tasks(active=True)
+    if not tasks:
+        await cb.message.answer(
+            "Сейчас нет доступных заданий. Загляните позже!", reply_markup=main_menu()
+        )
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    lines = ["💰 Задания. Подпишитесь на спонсоров и нажмите «Проверить»:\n"]
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(f"Задание #{t['id']}", callback_data=f"task_info:{t['id']}")]
+            for t in tasks
+        ]
+    )
+    await cb.message.answer(
+        "💰 Заработать голду\nПодпишитесь на каналы спонсоров и получите голду за подписку:",
+        reply_markup=kb,
+    )
+
+
+@router.callback_query(F.data.startswith("task_info:"))
+async def cq_task_info(cb: CallbackQuery):
+    task_id = int(cb.data.split(":", 1)[1])
+    task = db.get_task(task_id)
+    if not task or not task["active"]:
+        await cb.answer("Задание не активно", show_alert=True)
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{task['sponsor']}"),
+                InlineKeyboardButton("✅ Проверить подписку", callback_data=f"task_check:{task_id}"),
+            ],
+            [InlineKeyboardButton("↩️ Назад", callback_data="earn_gold")],
+        ]
+    )
+    await cb.message.edit_text(
+        f"Задание #{task['id']}\n"
+        f"Подпишитесь на канал: @{task['sponsor']}\n"
+        f"Награда: {task['reward']} {cur}\n\n"
+        "После подписки нажмите «Проверить подписку».",
+        reply_markup=kb,
+    )
+    await cb.answer()
+
+
+async def resolve_chat_id(sponsor):
+    try:
+        chat = await bot.get_chat(f"@{sponsor}")
+        return chat.id
+    except Exception:
+        return None
+
+
+@router.callback_query(F.data.startswith("task_check:"))
+async def cq_task_check(cb: CallbackQuery):
+    await cb.answer()
+    task_id = int(cb.data.split(":", 1)[1])
+    task = db.get_task(task_id)
+    if not task or not task["active"]:
+        await cb.answer("Задание не активно", show_alert=True)
+        return
+    user_id = cb.from_user.id
+    cur = db.get_setting("currency", config.CURRENCY)
+    chat_id = await resolve_chat_id(task["sponsor"])
+    if not chat_id:
+        await cb.message.answer(
+            f"Не удалось проверить — бот не в канале @{task['sponsor']}.\n"
+            "Добавьте бота в канал (как админа) и попробуйте снова."
+        )
+        return
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        subscribed = member.status in ("member", "administrator", "creator")
+    except Exception:
+        subscribed = False
+
+    completion = db.get_completion(task_id, user_id)
+
+    if not subscribed:
+        db.set_completion_rewarded(task_id, user_id, False)
+        await cb.message.answer(
+            f"Вы не подписаны на @{task['sponsor']}.\n"
+            "Подпишитесь и нажмите «Проверить подписку» снова."
+        )
+        return
+
+    if completion and completion["rewarded"]:
+        await cb.message.answer(
+            f"Вы уже получили награду за это задание.\n"
+            "Продолжайте подписку, чтобы награда осталась у вас."
+        )
+        return
+
+    db.get_user(user_id)
+    db.add_balance(user_id, task["reward"])
+    db.add_completion(task_id, user_id)
+    db.set_completion_rewarded(task_id, user_id, True)
+    await cb.message.answer(
+        f"🎉 Подписка подтверждена! Начислено: +{task['reward']} {cur}.",
+        reply_markup=main_menu(),
+    )
+
+
+async def check_subscriptions_loop():
+    await asyncio.sleep(30)
+    while True:
+        try:
+            completions = db.list_completions_rewarded()
+            for comp in completions:
+                task = db.get_task(comp["task_id"])
+                if not task or not task["active"]:
+                    continue
+                user = db.get_user(comp["user_id"])
+                if not user:
+                    continue
+                chat_id = await resolve_chat_id(task["sponsor"])
+                if not chat_id:
+                    continue
+                try:
+                    member = await bot.get_chat_member(chat_id, comp["user_id"])
+                    subscribed = member.status in ("member", "administrator", "creator")
+                except Exception:
+                    continue
+                if not subscribed:
+                    db.spend_balance(comp["user_id"], task["reward"])
+                    db.set_completion_rewarded(comp["task_id"], comp["user_id"], False)
+                    cur = db.get_setting("currency", config.CURRENCY)
+                    try:
+                        await bot.send_message(
+                            comp["user_id"],
+                            f"❌ Вы отписались от @{task['sponsor']}.\n"
+                            f"Списано: −{task['reward']} {cur} с вашего баланса.",
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            logging.exception("check_subscriptions_loop error")
+        await asyncio.sleep(180)
 
 
 @router.callback_query(F.data == "start_form")
@@ -629,7 +849,11 @@ async def main():
     )
     dp = Dispatcher()
     dp.include_router(router)
-    await asyncio.gather(dp.start_polling(bot), run_http())
+    await asyncio.gather(
+        dp.start_polling(bot),
+        run_http(),
+        check_subscriptions_loop(),
+    )
 
 
 if __name__ == "__main__":

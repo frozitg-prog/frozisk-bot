@@ -75,6 +75,29 @@ def init():
         )
         """
     )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sponsor TEXT,
+            reward REAL,
+            active INTEGER DEFAULT 1,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS task_dones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER,
+            user_id INTEGER,
+            rewarded INTEGER DEFAULT 1,
+            created_at TEXT,
+            UNIQUE(task_id, user_id)
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -295,3 +318,81 @@ def stats():
         "all_requests": all_requests,
         "pending_wds": pending_wds,
     }
+
+
+def add_task(sponsor, reward):
+    conn = connect()
+    cur = conn.execute(
+        "INSERT INTO tasks (sponsor, reward, created_at) VALUES (?, ?, ?)",
+        (sponsor, reward, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def get_task(task_id):
+    conn = connect()
+    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def list_tasks(active=True):
+    conn = connect()
+    if active is None:
+        rows = conn.execute(
+            "SELECT * FROM tasks ORDER BY id DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE active = ? ORDER BY id DESC", (1 if active else 0,)
+        ).fetchall()
+    conn.close()
+    return rows
+
+
+def deactivate_task(task_id):
+    conn = connect()
+    conn.execute("UPDATE tasks SET active = 0 WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_completion(task_id, user_id):
+    conn = connect()
+    row = conn.execute(
+        "SELECT * FROM task_dones WHERE task_id = ? AND user_id = ?",
+        (task_id, user_id),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def add_completion(task_id, user_id):
+    conn = connect()
+    conn.execute(
+        "INSERT OR IGNORE INTO task_dones (task_id, user_id, created_at) VALUES (?, ?, ?)",
+        (task_id, user_id, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_completion_rewarded(task_id, user_id, rewarded):
+    conn = connect()
+    conn.execute(
+        "UPDATE task_dones SET rewarded = ? WHERE task_id = ? AND user_id = ?",
+        (1 if rewarded else 0, task_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_completions_rewarded():
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM task_dones WHERE rewarded = 1"
+    ).fetchall()
+    conn.close()
+    return rows
