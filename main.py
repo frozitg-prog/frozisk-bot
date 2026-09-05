@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -100,18 +101,16 @@ def _trim_dec(d):
 def _word_amount(d, forms):
     s = _trim_dec(d)
     n = int(d)
-    mod = n % 10
     if d != int(d):
-        if 1 <= mod <= 4 and n % 100 not in (11, 12, 13, 14):
+        word = forms[1]
+    else:
+        mod = n % 10
+        if mod == 1 and n % 100 != 11:
+            word = forms[0]
+        elif 2 <= mod <= 4 and n % 100 not in (12, 13, 14):
             word = forms[1]
         else:
             word = forms[2]
-    elif mod == 1 and n % 100 != 11:
-        word = forms[0]
-    elif 2 <= mod <= 4 and n % 100 not in (12, 13, 14):
-        word = forms[1]
-    else:
-        word = forms[2]
     return f"{s} {word}"
 
 
@@ -673,7 +672,7 @@ async def cq_promo_send(cb: CallbackQuery):
                     [
                         InlineKeyboardButton(
                             text="📋 Копировать",
-                            url=f"tg://copy?text={code}",
+                            copy_text=CopyTextButton(text=code),
                         )
                     ]
                 ]
@@ -699,7 +698,7 @@ async def cq_promo_copy(cb: CallbackQuery):
             [
                 InlineKeyboardButton(
                     text="📋 Копировать",
-                    url=f"tg://copy?text={code}",
+                    copy_text=CopyTextButton(text=code),
                 )
             ]
         ]
@@ -1744,7 +1743,7 @@ async def cq_balance(cb: CallbackQuery):
     cur = db.get_setting("currency", config.CURRENCY)
     link = f"https://t.me/{config.BOT_USERNAME}?start={cb.from_user.id}"
     await cb.message.answer(
-        f"👛 Ваш баланс: {user['balance']} {cur}\n\n"
+        f"👛 Ваш баланс: {fmt_num(user['balance'])} {cur}\n\n"
         f"🔗 Ваша реферальная ссылка:\n{link}\n"
         "Приглашайте друзей — получайте голду за их вступление и задания!"
     )
