@@ -42,6 +42,10 @@ class Promo(StatesGroup):
     code = State()
 
 
+class AdminBalance(StatesGroup):
+    amount = State()
+
+
 def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -273,6 +277,15 @@ async def cmd_userbalance(message: Message, command: CommandObject):
     referrals = db.count_referrals(user["id"])
     username = f"@{user['username']}" if user["username"] else "—"
     link = f"https://t.me/{config.BOT_USERNAME}?start={user['id']}"
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➕ Добавить баланс", callback_data=f"ub_add:{user['id']}"),
+                InlineKeyboardButton(text="🔄 Обнулить", callback_data=f"ub_zero:{user['id']}"),
+            ],
+            [InlineKeyboardButton(text="💸 Активные выводы", callback_data=f"ub_wd:{user['id']}")],
+        ]
+    )
     await message.answer(
         f"👤 Информация о пользователе\n"
         f"ID: {user['id']}\n"
@@ -282,8 +295,110 @@ async def cmd_userbalance(message: Message, command: CommandObject):
         f"Пригласил: {referrals} чел.\n"
         f"Пришёл по реф.: {user['ref_id'] if user['ref_id'] else '—'}\n"
         f"🔗 {link}\n"
-        f"Дата регистрации: {user['created_at'][:16]}"
+        f"Дата регистрации: {user['created_at'][:16]}",
+        reply_markup=kb,
     )
+
+
+@router.callback_query(F.data.startswith("ub_add:"))
+async def cq_ub_add(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        await cb.answer("Недоступно", show_alert=True)
+        return
+    user_id = int(cb.data.split(":", 1)[1])
+    await state.set_state(AdminBalance.amount)
+    await state.update_data(ub_target=user_id)
+    await cb.answer()
+    await cb.message.answer(f"Введите количество {db.get_setting('currency', config.CURRENCY)} для начисления:")
+
+
+@router.message(AdminBalance.amount)
+async def admin_balance_amount(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    target = data.get("ub_target")
+    if not target:
+        await state.clear()
+        await message.answer("Действие устарело. Откройте /userbalance заново.")
+        return
+    text = message.text.replace(",", ".") if message.text else ""
+    if not text.isdigit():
+        await message.answer("Введите число (количество голды).")
+        return
+    amount = int(float(text))
+    user = db.get_user(target)
+    db.add_balance(target, amount)
+    cur = db.get_setting("currency", config.CURRENCY)
+    await state.clear()
+    await message.answer(
+        f"➕ Начислено +{amount} {cur} пользователю {user['first_name'] if user else target} "
+        f"(ID {target}).\nТекущий баланс: {user['balance'] + amount} {cur}."
+    )
+
+
+@router.callback_query(F.data.startswith("ub_zero:"))
+async def cq_ub_zero(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        await cb.answer("Недоступно", show_alert=True)
+        return
+    user_id = int(cb.data.split(":", 1)[1])
+    user = db.get_user(user_id)
+    if not user:
+        await cb.answer("Пользователь не найден", show_alert=True)
+        return
+    db.set_balance(user_id, 0)
+    await cb.answer("Баланс обнулён")
+    await cb.message.edit_text(
+        f"{cb.message.text}\n\n🔄 Баланс обнулён до 0 {db.get_setting('currency', config.CURRENCY)}."
+    )
+
+
+@router.callback_query(F.data.startswith("ub_wd:"))
+async def cq_ub_wd(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        await cb.answer("Недоступно", show_alert=True)
+        return
+    user_id = int(cb.data.split(":", 1)[1])
+    rows = db.list_user_withdrawals(user_id, limit=10)
+    if not rows:
+        await cb.answer("Выводов нет", show_alert=True)
+        await cb.message.answer("У пользователя нет выводов.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    label = {"pending": "⏳ ЖДЁТ", "paid": "✅ ВЫПЛАЧЕН", "rejected": "❌ ОТКЛОНЁН"}
+    lines = []
+    for r in rows:
+        lines.append(
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {r['amount']} {cur} · "
+            f"🎮 {r.get('skin') or '—'} · {r['created_at'][:16]}\n"
+            f"    📋 /withdraw {r['id']}"
+        )
+    await cb.answer()
+    await cb.message.answer("💸 Выводы пользователя:\n\n" + "\n\n".join(lines))
+
+
+@router.message(Command("userwithdrawals"))
+async def cmd_userwithdrawals(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args or not command.args.isdigit():
+        await message.answer("Использование: /userwithdrawals <id пользователя>")
+        return
+    rows = db.list_user_withdrawals(int(command.args))
+    if not rows:
+        await message.answer("У этого пользователя нет выводов.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    label = {"pending": "⏳ ЖДЁТ", "paid": "✅ ВЫПЛАЧЕН", "rejected": "❌ ОТКЛОНЁН"}
+    lines = []
+    for r in rows:
+        lines.append(
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {r['amount']} {cur} · "
+            f"🎮 {r.get('skin') or '—'} · {r['created_at'][:16]}\n"
+            f"    📋 /withdraw {r['id']}"
+        )
+    await message.answer(f"💸 Выводы пользователя {command.args}:\n\n" + "\n\n".join(lines))
 
 
 @router.message(Command("addbal"))

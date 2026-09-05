@@ -312,6 +312,26 @@ def list_withdrawals(status=None, limit=15):
     return rows
 
 
+def list_user_withdrawals(user_id, limit=15):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def list_user_requests(user_id, limit=15):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM requests WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def stats():
     conn = connect()
     users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
