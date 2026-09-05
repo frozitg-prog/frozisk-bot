@@ -17,5 +17,7 @@ DEFAULT_MIN_WITHDRAW = 100
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "bot.db")
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
 _proxy = os.getenv("BOT_PROXY", "http://127.0.0.1:1443")
 PROXY = _proxy if _proxy and _proxy.lower() != "none" else None

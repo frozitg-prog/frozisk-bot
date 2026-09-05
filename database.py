@@ -1,103 +1,104 @@
-import sqlite3
 from datetime import datetime
+
+import psycopg
+from psycopg.rows import dict_row
 
 import config
 
 
 def connect():
-    conn = sqlite3.connect(config.DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg.connect(
+        config.DATABASE_URL,
+        row_factory=dict_row,
+    )
     return conn
 
 
 def init():
     conn = connect()
-    c = conn.cursor()
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            ref_id INTEGER,
-            balance REAL DEFAULT 0,
-            created_at TEXT
+    with conn.cursor() as c:
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                ref_id BIGINT,
+                balance DOUBLE PRECISION DEFAULT 0,
+                created_at TEXT
+            )
+            """
         )
-        """
-    )
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT,
-            phone TEXT,
-            comment TEXT,
-            status TEXT DEFAULT 'new',
-            created_at TEXT
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS requests (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                name TEXT,
+                phone TEXT,
+                comment TEXT,
+                status TEXT DEFAULT 'new',
+                created_at TEXT
+            )
+            """
         )
-        """
-    )
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS withdrawals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            amount REAL,
-            details TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS withdrawals (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                amount DOUBLE PRECISION,
+                details TEXT,
+                skin TEXT,
+                screenshot TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT
+            )
+            """
         )
-        """
-    )
-    cols = [row[1] for row in c.execute("PRAGMA table_info(withdrawals)").fetchall()]
-    if "skin" not in cols:
-        c.execute("ALTER TABLE withdrawals ADD COLUMN skin TEXT")
-    if "screenshot" not in cols:
-        c.execute("ALTER TABLE withdrawals ADD COLUMN screenshot TEXT")
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
         )
-        """
-    )
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS promocodes (
-            code TEXT PRIMARY KEY,
-            amount REAL,
-            used INTEGER DEFAULT 0,
-            used_by INTEGER,
-            used_at TEXT,
-            created_at TEXT
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS promocodes (
+                code TEXT PRIMARY KEY,
+                amount DOUBLE PRECISION,
+                used INTEGER DEFAULT 0,
+                used_by BIGINT,
+                used_at TEXT,
+                created_at TEXT
+            )
+            """
         )
-        """
-    )
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sponsor TEXT,
-            reward REAL,
-            active INTEGER DEFAULT 1,
-            created_at TEXT
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id SERIAL PRIMARY KEY,
+                sponsor TEXT,
+                reward DOUBLE PRECISION,
+                active INTEGER DEFAULT 1,
+                created_at TEXT
+            )
+            """
         )
-        """
-    )
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS task_dones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id INTEGER,
-            user_id INTEGER,
-            rewarded INTEGER DEFAULT 1,
-            created_at TEXT,
-            UNIQUE(task_id, user_id)
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS task_dones (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER,
+                user_id BIGINT,
+                rewarded INTEGER DEFAULT 1,
+                created_at TEXT,
+                UNIQUE(task_id, user_id)
+            )
+            """
         )
-        """
-    )
     conn.commit()
     conn.close()
 
@@ -105,8 +106,8 @@ def init():
 def set_setting(key, value):
     conn = connect()
     conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "INSERT INTO settings (key, value) VALUES (%s, %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
         (key, str(value)),
     )
     conn.commit()
@@ -115,7 +116,9 @@ def set_setting(key, value):
 
 def get_setting(key, default=None):
     conn = connect()
-    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = %s", (key,)
+    ).fetchone()
     conn.close()
     if row is None:
         return default
@@ -127,18 +130,18 @@ def get_setting(key, default=None):
 
 def add_user(user_id, username, first_name, ref_id=None):
     conn = connect()
-    row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT id FROM users WHERE id = %s", (user_id,)).fetchone()
     is_new = row is None
     if is_new:
         conn.execute(
             "INSERT INTO users (id, username, first_name, ref_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s)",
             (user_id, username, first_name, ref_id, datetime.now().isoformat()),
         )
         conn.commit()
     else:
         if username is not None:
-            conn.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
+            conn.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
             conn.commit()
     conn.close()
     return is_new
@@ -146,7 +149,7 @@ def add_user(user_id, username, first_name, ref_id=None):
 
 def get_user(user_id):
     conn = connect()
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
     conn.close()
     return row
 
@@ -154,7 +157,7 @@ def get_user(user_id):
 def get_user_by_username(username):
     conn = connect()
     row = conn.execute(
-        "SELECT * FROM users WHERE lower(username) = lower(?)",
+        "SELECT * FROM users WHERE lower(username) = lower(%s)",
         (username.lstrip("@"),),
     ).fetchone()
     conn.close()
@@ -164,8 +167,8 @@ def get_user_by_username(username):
 def count_referrals(ref_id):
     conn = connect()
     count = conn.execute(
-        "SELECT COUNT(*) FROM users WHERE ref_id = ?", (ref_id,)
-    ).fetchone()[0]
+        "SELECT COUNT(*) AS cnt FROM users WHERE ref_id = %s", (ref_id,)
+    ).fetchone()["cnt"]
     conn.close()
     return count
 
@@ -173,7 +176,7 @@ def count_referrals(ref_id):
 def add_balance(user_id, amount):
     conn = connect()
     conn.execute(
-        "UPDATE users SET balance = balance + ? WHERE id = ?",
+        "UPDATE users SET balance = balance + %s WHERE id = %s",
         (amount, user_id),
     )
     conn.commit()
@@ -183,7 +186,7 @@ def add_balance(user_id, amount):
 def spend_balance(user_id, amount):
     conn = connect()
     cur = conn.execute(
-        "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+        "UPDATE users SET balance = balance - %s WHERE id = %s AND balance >= %s",
         (amount, user_id, amount),
     )
     conn.commit()
@@ -194,7 +197,7 @@ def spend_balance(user_id, amount):
 def set_balance(user_id, amount):
     conn = connect()
     conn.execute(
-        "UPDATE users SET balance = ? WHERE id = ?",
+        "UPDATE users SET balance = %s WHERE id = %s",
         (max(float(amount), 0), user_id),
     )
     conn.commit()
@@ -205,24 +208,25 @@ def add_request(user_id, name, phone, comment):
     conn = connect()
     cur = conn.execute(
         "INSERT INTO requests (user_id, name, phone, comment, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
         (user_id, name, phone, comment, datetime.now().isoformat()),
     )
+    req_id = cur.fetchone()["id"]
     conn.commit()
     conn.close()
-    return cur.lastrowid
+    return req_id
 
 
 def get_request(req_id):
     conn = connect()
-    row = conn.execute("SELECT * FROM requests WHERE id = ?", (req_id,)).fetchone()
+    row = conn.execute("SELECT * FROM requests WHERE id = %s", (req_id,)).fetchone()
     conn.close()
     return row
 
 
 def set_request_status(req_id, status):
     conn = connect()
-    conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, req_id))
+    conn.execute("UPDATE requests SET status = %s WHERE id = %s", (status, req_id))
     conn.commit()
     conn.close()
 
@@ -231,13 +235,75 @@ def list_requests(status=None, limit=10):
     conn = connect()
     if status:
         rows = conn.execute(
-            "SELECT * FROM requests WHERE status = ? ORDER BY id DESC LIMIT ?",
+            "SELECT * FROM requests WHERE status = %s ORDER BY id DESC LIMIT %s",
             (status, limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM requests ORDER BY id DESC LIMIT %s", (limit,)
         ).fetchall()
+    conn.close()
+    return rows
+
+
+def add_withdrawal(user_id, amount, details, skin=None, screenshot=None):
+    conn = connect()
+    cur = conn.execute(
+        "INSERT INTO withdrawals (user_id, amount, details, skin, screenshot, created_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+        (user_id, amount, details, skin, screenshot, datetime.now().isoformat()),
+    )
+    wd_id = cur.fetchone()["id"]
+    conn.commit()
+    conn.close()
+    return wd_id
+
+
+def get_withdrawal(wd_id):
+    conn = connect()
+    row = conn.execute("SELECT * FROM withdrawals WHERE id = %s", (wd_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def set_withdrawal_status(wd_id, status):
+    conn = connect()
+    conn.execute("UPDATE withdrawals SET status = %s WHERE id = %s", (status, wd_id))
+    conn.commit()
+    conn.close()
+
+
+def list_withdrawals(status=None, limit=15):
+    conn = connect()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM withdrawals WHERE status = %s ORDER BY id DESC LIMIT %s",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM withdrawals ORDER BY id DESC LIMIT %s", (limit,)
+        ).fetchall()
+    conn.close()
+    return rows
+
+
+def list_user_withdrawals(user_id, limit=15):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM withdrawals WHERE user_id = %s ORDER BY id DESC LIMIT %s",
+        (user_id, limit),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def list_user_requests(user_id, limit=15):
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM requests WHERE user_id = %s ORDER BY id DESC LIMIT %s",
+        (user_id, limit),
+    ).fetchall()
     conn.close()
     return rows
 
@@ -245,7 +311,8 @@ def list_requests(status=None, limit=10):
 def add_code(code, amount):
     conn = connect()
     conn.execute(
-        "INSERT OR IGNORE INTO promocodes (code, amount, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO promocodes (code, amount, created_at) VALUES (%s, %s, %s) "
+        "ON CONFLICT (code) DO NOTHING",
         (code, amount, datetime.now().isoformat()),
     )
     conn.commit()
@@ -254,7 +321,7 @@ def add_code(code, amount):
 
 def get_code(code):
     conn = connect()
-    row = conn.execute("SELECT * FROM promocodes WHERE code = ?", (code,)).fetchone()
+    row = conn.execute("SELECT * FROM promocodes WHERE code = %s", (code,)).fetchone()
     conn.close()
     return row
 
@@ -262,8 +329,8 @@ def get_code(code):
 def use_code(code, user_id):
     conn = connect()
     cur = conn.execute(
-        "UPDATE promocodes SET used = 1, used_by = ?, used_at = ? "
-        "WHERE code = ? AND used = 0",
+        "UPDATE promocodes SET used = 1, used_by = %s, used_at = %s "
+        "WHERE code = %s AND used = 0",
         (user_id, datetime.now().isoformat(), code),
     )
     conn.commit()
@@ -274,105 +341,27 @@ def use_code(code, user_id):
 def list_codes(limit=20):
     conn = connect()
     rows = conn.execute(
-        "SELECT * FROM promocodes ORDER BY created_at DESC, code LIMIT ?",
-        (limit,),
+        "SELECT * FROM promocodes ORDER BY created_at DESC, code LIMIT %s", (limit,)
     ).fetchall()
     conn.close()
     return rows
-
-
-def add_withdrawal(user_id, amount, details, skin=None, screenshot=None):
-    conn = connect()
-    cur = conn.execute(
-        "INSERT INTO withdrawals (user_id, amount, details, skin, screenshot, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, amount, details, skin, screenshot, datetime.now().isoformat()),
-    )
-    conn.commit()
-    conn.close()
-    return cur.lastrowid
-
-
-def get_withdrawal(wd_id):
-    conn = connect()
-    row = conn.execute("SELECT * FROM withdrawals WHERE id = ?", (wd_id,)).fetchone()
-    conn.close()
-    return row
-
-
-def set_withdrawal_status(wd_id, status):
-    conn = connect()
-    conn.execute("UPDATE withdrawals SET status = ? WHERE id = ?", (status, wd_id))
-    conn.commit()
-    conn.close()
-
-
-def list_withdrawals(status=None, limit=15):
-    conn = connect()
-    if status:
-        rows = conn.execute(
-            "SELECT * FROM withdrawals WHERE status = ? ORDER BY id DESC LIMIT ?",
-            (status, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM withdrawals ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    conn.close()
-    return rows
-
-
-def list_user_withdrawals(user_id, limit=15):
-    conn = connect()
-    rows = conn.execute(
-        "SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-        (user_id, limit),
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def list_user_requests(user_id, limit=15):
-    conn = connect()
-    rows = conn.execute(
-        "SELECT * FROM requests WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-        (user_id, limit),
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def stats():
-    conn = connect()
-    users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    new_requests = conn.execute("SELECT COUNT(*) FROM requests WHERE status = 'new'").fetchone()[0]
-    all_requests = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
-    pending_wds = conn.execute(
-        "SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'"
-    ).fetchone()[0]
-    conn.close()
-    return {
-        "users": users,
-        "new_requests": new_requests,
-        "all_requests": all_requests,
-        "pending_wds": pending_wds,
-    }
 
 
 def add_task(sponsor, reward):
     conn = connect()
     cur = conn.execute(
-        "INSERT INTO tasks (sponsor, reward, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO tasks (sponsor, reward, created_at) VALUES (%s, %s, %s) RETURNING id",
         (sponsor, reward, datetime.now().isoformat()),
     )
+    task_id = cur.fetchone()["id"]
     conn.commit()
     conn.close()
-    return cur.lastrowid
+    return task_id
 
 
 def get_task(task_id):
     conn = connect()
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    row = conn.execute("SELECT * FROM tasks WHERE id = %s", (task_id,)).fetchone()
     conn.close()
     return row
 
@@ -380,12 +369,10 @@ def get_task(task_id):
 def list_tasks(active=True):
     conn = connect()
     if active is None:
-        rows = conn.execute(
-            "SELECT * FROM tasks ORDER BY id DESC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM tasks ORDER BY id DESC").fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE active = ? ORDER BY id DESC", (1 if active else 0,)
+            "SELECT * FROM tasks WHERE active = %s ORDER BY id DESC", (1 if active else 0,)
         ).fetchall()
     conn.close()
     return rows
@@ -393,7 +380,7 @@ def list_tasks(active=True):
 
 def deactivate_task(task_id):
     conn = connect()
-    conn.execute("UPDATE tasks SET active = 0 WHERE id = ?", (task_id,))
+    conn.execute("UPDATE tasks SET active = 0 WHERE id = %s", (task_id,))
     conn.commit()
     conn.close()
 
@@ -401,7 +388,7 @@ def deactivate_task(task_id):
 def get_completion(task_id, user_id):
     conn = connect()
     row = conn.execute(
-        "SELECT * FROM task_dones WHERE task_id = ? AND user_id = ?",
+        "SELECT * FROM task_dones WHERE task_id = %s AND user_id = %s",
         (task_id, user_id),
     ).fetchone()
     conn.close()
@@ -411,7 +398,8 @@ def get_completion(task_id, user_id):
 def add_completion(task_id, user_id):
     conn = connect()
     conn.execute(
-        "INSERT OR IGNORE INTO task_dones (task_id, user_id, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO task_dones (task_id, user_id, created_at) VALUES (%s, %s, %s) "
+        "ON CONFLICT (task_id, user_id) DO NOTHING",
         (task_id, user_id, datetime.now().isoformat()),
     )
     conn.commit()
@@ -421,7 +409,7 @@ def add_completion(task_id, user_id):
 def set_completion_rewarded(task_id, user_id, rewarded):
     conn = connect()
     conn.execute(
-        "UPDATE task_dones SET rewarded = ? WHERE task_id = ? AND user_id = ?",
+        "UPDATE task_dones SET rewarded = %s WHERE task_id = %s AND user_id = %s",
         (1 if rewarded else 0, task_id, user_id),
     )
     conn.commit()
@@ -430,8 +418,25 @@ def set_completion_rewarded(task_id, user_id, rewarded):
 
 def list_completions_rewarded():
     conn = connect()
-    rows = conn.execute(
-        "SELECT * FROM task_dones WHERE rewarded = 1"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM task_dones WHERE rewarded = 1").fetchall()
     conn.close()
     return rows
+
+
+def stats():
+    conn = connect()
+    users = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
+    new_requests = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM requests WHERE status = 'new'"
+    ).fetchone()["cnt"]
+    all_requests = conn.execute("SELECT COUNT(*) AS cnt FROM requests").fetchone()["cnt"]
+    pending_wds = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM withdrawals WHERE status = 'pending'"
+    ).fetchone()["cnt"]
+    conn.close()
+    return {
+        "users": users,
+        "new_requests": new_requests,
+        "all_requests": all_requests,
+        "pending_wds": pending_wds,
+    }
