@@ -566,7 +566,7 @@ def set_ban(user_id, banned):
     with conn:
         conn.execute(
             f"UPDATE users SET banned = {_PH} WHERE id = {_PH}",
-            (1 if banned else 0, user_id),
+            (bool(banned), user_id),
         )
     conn.close()
 
@@ -576,7 +576,7 @@ def set_mute(user_id, muted):
     with conn:
         conn.execute(
             f"UPDATE users SET muted = {_PH} WHERE id = {_PH}",
-            (1 if muted else 0, user_id),
+            (bool(muted), user_id),
         )
     conn.close()
 
