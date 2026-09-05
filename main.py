@@ -41,6 +41,12 @@ class Promo(StatesGroup):
     code = State()
 
 
+class CreatePromo(StatesGroup):
+    code = State()
+    amount = State()
+    uses = State()
+
+
 class AdminBalance(StatesGroup):
     amount = State()
 
@@ -63,7 +69,7 @@ def main_menu():
                 InlineKeyboardButton(text="🎰 Рулетка", callback_data="roulette"),
             ],
             [
-                InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="start_promo"),
+                InlineKeyboardButton(text="🎁 Промокод", callback_data="promo_menu"),
                 InlineKeyboardButton(text="💰 Заработать голду", callback_data="earn_gold"),
             ],
             [
@@ -653,14 +659,15 @@ def promo_result_kb(code):
 
 @router.callback_query(F.data.startswith("promo_send:"))
 async def cq_promo_send(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return
     code = cb.data.split(":", 1)[1]
     info = promo_info.get(code)
     if not info:
         await cb.answer("Информация о промокоде не найдена", show_alert=True)
         return
-    amount, uses = info
+    amount, uses, owner = info
+    if not is_admin(cb.from_user.id) and owner != cb.from_user.id:
+        await cb.answer("Нельзя отправить чужой промокод", show_alert=True)
+        return
     cur = db.get_setting("currency", config.CURRENCY)
     text = promo_code_text(code, amount, uses, cur)
     users = db.get_all_user_ids()
@@ -681,11 +688,17 @@ async def cq_promo_send(cb: CallbackQuery):
             sent += 1
         except Exception:
             pass
-    await cb.answer()
-    await cb.message.edit_text(
-        f"📤 Промокод отправлен {sent} из {len(users)} пользователям.",
-        reply_markup=admin_sub_kb([], "adm_codes"),
-    )
+    if is_admin(cb.from_user.id):
+        await cb.answer()
+        await cb.message.edit_text(
+            f"📤 Промокод отправлен {sent} из {len(users)} пользователям.",
+            reply_markup=admin_sub_kb([], "adm_codes"),
+        )
+    else:
+        await cb.answer()
+        await cb.message.answer(
+            f"📤 Промокод отправлен {sent} из {len(users)} пользователям!"
+        )
 
 
 @router.callback_query(F.data.startswith("promo_copy:"))
@@ -965,7 +978,7 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         uses = random.randint(int(r[0]), int(r[1]))
         code = gen_promo_code()
         db.add_code(code, amount, max_uses=uses)
-        promo_info[code] = (amount, uses)
+        promo_info[code] = (amount, uses, message.from_user.id)
         cur = db.get_setting("currency", config.CURRENCY)
         await state.clear()
         await message.answer(
@@ -1934,6 +1947,160 @@ async def activate_promo(user_id, code_text):
         db.add_balance(user_id, pc["amount"])
         return pc, f"🎉 Промокод {code} активирован!\nНачислено: +{fmt_num(pc['amount'])} {cur} на баланс."
     return None, f"Промокод {code} уже использован вами."
+
+
+@router.callback_query(F.data == "promo_menu")
+async def cq_promo_menu(cb: CallbackQuery):
+    await cb.answer()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="start_promo"),
+                InlineKeyboardButton(text="🛠 Создать свой промокод", callback_data="create_promo"),
+            ],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+    await cb.message.edit_text("🎁 Промокоды. Выберите действие:", reply_markup=kb)
+
+
+@router.callback_query(F.data == "create_promo")
+async def cq_create_promo(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(CreatePromo.code)
+    await cb.answer()
+    await cb.message.answer(
+        "🛠 Создание своего промокода.\n"
+        "С вас спишется: награда × количество активаций.\n\n"
+        "Введите код (латиницей и цифрами, например: <code>MYGIFT</code>):"
+    )
+
+
+@router.message(CreatePromo.code, F.text)
+async def cp_code(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    if not code or not code.isalnum():
+        await message.answer("Код может содержать только буквы и цифры.")
+        return
+    existing = db.get_code(code)
+    if existing:
+        await message.answer("Такой промокод уже существует. Введите другой:")
+        return
+    await state.update_data(cp_code=code)
+    await state.set_state(CreatePromo.amount)
+    await message.answer("Введите количество голды за одну активацию:")
+    return
+
+
+@router.message(CreatePromo.amount, F.text)
+async def cp_amount(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.strip().replace(",", "."))
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+    if amount <= 0:
+        await message.answer("Количество голды должно быть больше нуля.")
+        return
+    await state.update_data(cp_amount=amount)
+    await state.set_state(CreatePromo.uses)
+    await message.answer("Введите количество активаций:")
+    return
+
+
+@router.message(CreatePromo.uses, F.text)
+async def cp_uses(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text.isdigit() or int(text) < 2:
+        await message.answer("Минимум 2 активации. Введите число от 2:")
+        return
+    uses = int(text)
+    data = await state.get_data()
+    amount = data["cp_amount"]
+    code = data["cp_code"]
+    cost = amount * uses
+    cur = db.get_setting("currency", config.CURRENCY)
+    user = db.get_user(message.from_user.id)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data="create_promo_ok"),
+                InlineKeyboardButton(text="❌ Отменить", callback_data="create_promo_no"),
+            ],
+        ]
+    )
+    await state.update_data(cp_uses=uses, cp_cost=cost)
+    await message.answer(
+        "🧾 Подтверждение покупки промокода:\n"
+        f"Код: <code>{code}</code>\n"
+        f"Награда: {fmt_num(amount)} {cur} × {uses} активаций\n"
+        f"💸 Стоимость: {fmt_num(cost)} {cur}\n"
+        f"💳 Ваш баланс: {fmt_num(user['balance'])} {cur}\n\n"
+        f"Списать {fmt_num(cost)} {cur} с баланса?",
+        reply_markup=kb,
+    )
+    return
+
+
+@router.callback_query(F.data == "create_promo_ok")
+async def cq_create_promo_ok(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    cost = data.get("cp_cost")
+    if not cost:
+        await cb.answer("Заполните форму заново", show_alert=True)
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    user = db.get_user(cb.from_user.id)
+    if user["balance"] < cost:
+        await cb.answer("❌ Недостаточно голды на балансе!", show_alert=True)
+        return
+    db.spend_balance(cb.from_user.id, cost)
+    db.add_code(data["cp_code"], data["cp_amount"], max_uses=int(data["cp_uses"]))
+    promo_info[data["cp_code"]] = (data["cp_amount"], int(data["cp_uses"]), cb.from_user.id)
+    await cb.answer()
+    if is_admin(cb.from_user.id):
+        result_kb = promo_result_kb(data["cp_code"])
+    else:
+        result_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📤 Отправить промокод юзерам",
+                        callback_data=f"promo_send:{data['cp_code']}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📋 Показать для копирования",
+                        callback_data=f"promo_copy:{data['cp_code']}",
+                    )
+                ],
+                [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+            ]
+        )
+    await cb.message.answer(
+        "✅ Промокод создан и оплачен!\n"
+        + promo_code_text(
+            data["cp_code"], data["cp_amount"], int(data["cp_uses"]), cur
+        ),
+        reply_markup=result_kb,
+    )
+
+
+@router.callback_query(F.data == "create_promo_no")
+async def cq_create_promo_no(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.answer()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="start_promo"),
+                InlineKeyboardButton(text="🛠 Создать свой промокод", callback_data="create_promo"),
+            ],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+    await cb.message.edit_text("🎁 Промокоды. Выберите действие:", reply_markup=kb)
 
 
 @router.callback_query(F.data == "start_promo")
