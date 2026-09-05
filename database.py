@@ -151,6 +151,15 @@ def get_user(user_id):
     return row
 
 
+def count_referrals(ref_id):
+    conn = connect()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE ref_id = ?", (ref_id,)
+    ).fetchone()[0]
+    conn.close()
+    return count
+
+
 def add_balance(user_id, amount):
     conn = connect()
     conn.execute(

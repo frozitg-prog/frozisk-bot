@@ -258,6 +258,34 @@ async def cmd_set_currency(message: Message, command: CommandObject):
     await message.answer(f"Валюта установлена: {command.args.strip()}")
 
 
+@router.message(Command("userbalance"))
+async def cmd_userbalance(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    if not command.args or not command.args.isdigit():
+        await message.answer("Использование: /userbalance <id пользователя>")
+        return
+    user = db.get_user(int(command.args))
+    if not user:
+        await message.answer("Пользователь не найден.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    referrals = db.count_referrals(user["id"])
+    username = f"@{user['username']}" if user["username"] else "—"
+    link = f"https://t.me/{config.BOT_USERNAME}?start={user['id']}"
+    await message.answer(
+        f"👤 Информация о пользователе\n"
+        f"ID: {user['id']}\n"
+        f"Имя: {user['first_name']}\n"
+        f"Ник: {username}\n"
+        f"Баланс: {user['balance']} {cur}\n"
+        f"Пригласил: {referrals} чел.\n"
+        f"Пришёл по реф.: {user['ref_id'] if user['ref_id'] else '—'}\n"
+        f"🔗 {link}\n"
+        f"Дата регистрации: {user['created_at'][:16]}"
+    )
+
+
 @router.message(Command("addbal"))
 async def cmd_addbal(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
