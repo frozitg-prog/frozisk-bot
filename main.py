@@ -464,12 +464,12 @@ async def cmd_tasks(message: Message):
     await message.answer("📢 Задания:\n" + "\n".join(lines))
 
 
-@router.message(Command("del_task"))
+@router.message(Command("delZad", ignore_case=True))
 async def cmd_del_task(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     if not command.args or not command.args.isdigit():
-        await message.answer("Использование: /del_task <номер задания>")
+        await message.answer("Использование: /delZad <номер задания>")
         return
     task = db.get_task(int(command.args))
     if not task:
