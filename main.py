@@ -1105,6 +1105,11 @@ def parse_ban_target(value):
     return None
 
 
+def _db_error_msg(exc):
+    text = str(exc) or type(exc).__name__
+    return f"⚠️ Ошибка БД: {text[:150]}"
+
+
 async def cmd_ban_unban(message: Message, command: CommandObject, banned: bool, action_name: str):
     if not is_admin(message.from_user.id):
         return
@@ -1114,16 +1119,16 @@ async def cmd_ban_unban(message: Message, command: CommandObject, banned: bool, 
         return
     try:
         target = parse_ban_target(args[0])
-    except Exception:
-        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+    except Exception as e:
+        await message.answer(_db_error_msg(e))
         return
     if not target:
         await message.answer("Пользователь не найден.")
         return
     try:
         db.set_ban(target, banned)
-    except Exception:
-        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+    except Exception as e:
+        await message.answer(_db_error_msg(e))
         return
     _moderation_cache.pop(target, None)
     await message.answer(
@@ -1141,16 +1146,16 @@ async def cmd_mute_unmute(message: Message, command: CommandObject, muted: bool,
         return
     try:
         target = parse_ban_target(args[0])
-    except Exception:
-        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+    except Exception as e:
+        await message.answer(_db_error_msg(e))
         return
     if not target:
         await message.answer("Пользователь не найден.")
         return
     try:
         db.set_mute(target, muted)
-    except Exception:
-        await message.answer("⚠️ Ошибка БД, попробуйте ещё раз.")
+    except Exception as e:
+        await message.answer(_db_error_msg(e))
         return
     _moderation_cache.pop(target, None)
     await message.answer(
