@@ -455,7 +455,7 @@ async def wd_skin(message: Message, state: FSMContext):
 
 
 @router.message(Withdraw.screenshot, F.photo)
-async def wd_screenshot(message: Message, state: FSMContext, album=None):
+async def wd_screenshot(message: Message, state: FSMContext):
     data = await state.update_data(screenshot=message.photo[-1].file_id)
     await state.clear()
 
@@ -494,6 +494,11 @@ async def wd_screenshot(message: Message, state: FSMContext, album=None):
         "Ожидайте, мы выплатим вам в ближайшее время.",
         reply_markup=main_menu(),
     )
+
+
+@router.message(Withdraw.screenshot)
+async def wd_screenshot_other(message: Message):
+    await message.answer("Отправьте именно фото — скриншот скина (кнопка 📎 → отправка фото).")
 
 
 @router.callback_query(F.data.startswith("req_"))
