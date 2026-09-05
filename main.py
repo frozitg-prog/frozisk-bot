@@ -1078,6 +1078,12 @@ f"Баланс: {fmt_num(user['balance'])} {cur}\n"
         db.delete_code(text.upper())
         await state.clear()
         await message.answer(f"🗑 Промокод {text.upper()} удалён. Активировать его больше нельзя.")
+        return
+
+    user = resolve_user(text)
+    if not user:
+        await message.answer("Пользователь не найден. Попробуйте ещё раз.")
+        return
 
 
 def parse_ban_target(value):
