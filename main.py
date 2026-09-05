@@ -39,6 +39,11 @@ class AdminBalance(StatesGroup):
     amount = State()
 
 
+class AdminPanel(StatesGroup):
+    target = State()
+    amount = State()
+
+
 def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -56,6 +61,43 @@ def main_menu():
 
 def is_admin(user_id):
     return user_id in config.ADMIN_IDS
+
+
+def admin_main_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats"),
+                InlineKeyboardButton(text="💸 Выводы", callback_data="adm_wd"),
+            ],
+            [
+                InlineKeyboardButton(text="👤 Пользователь", callback_data="adm_user"),
+                InlineKeyboardButton(text="💼 Баланс", callback_data="adm_bal"),
+            ],
+            [
+                InlineKeyboardButton(text="🎁 Промокоды", callback_data="adm_codes"),
+                InlineKeyboardButton(text="📢 Задания", callback_data="adm_tasks"),
+            ],
+            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings")],
+        ]
+    )
+
+
+def admin_sub_kb(buttons, back="adm_main"):
+    kb = list(buttons)
+    kb.append([InlineKeyboardButton(text="↩️ Назад", callback_data=back)])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def withdrawal_actions_kb(wd_id):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"wd_approve:{wd_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"wd_reject:{wd_id}"),
+            ]
+        ]
+    )
 
 
 def format_wd(wd):
@@ -188,6 +230,482 @@ async def cmd_set_skin(message: Message, command: CommandObject):
         return
     db.set_setting("withdraw_skin", command.args.strip())
     await message.answer(f"Скин установлен: {command.args.strip()}")
+
+
+@router.message(Command("admin", "a"))
+async def cmd_admin(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await message.answer(
+        "🛠 Админ-панель. Выберите действие:", reply_markup=admin_main_kb()
+    )
+
+
+@router.callback_query(F.data == "adm_main")
+async def cq_adm_main(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.clear()
+    await cb.answer()
+    await cb.message.edit_text(
+        "🛠 Админ-панель. Выберите действие:", reply_markup=admin_main_kb()
+    )
+
+
+@router.callback_query(F.data == "adm_stats")
+async def cq_adm_stats(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    s = db.stats()
+    cur = db.get_setting("currency", config.CURRENCY)
+    await cb.message.edit_text(
+        f"📊 Статистика\n"
+        f"Пользователей: {s['users']}\n"
+        f"Выводов в ожидании: {s['pending_wds']}\n\n"
+        f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} {cur}\n"
+        f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}\n"
+        f"Валюта: {cur}\n"
+        f"Скин для вывода: {db.get_setting('withdraw_skin', config.DEFAULT_SKIN)}",
+        reply_markup=admin_sub_kb([], "adm_main"),
+    )
+
+
+@router.callback_query(F.data == "adm_wd")
+async def cq_adm_wd(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    await cb.message.edit_text(
+        "💸 Выводы:",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(text="📋 Все", callback_data="adm_wd_all"),
+                    InlineKeyboardButton(text="⏳ Ожидают", callback_data="adm_wd_pending"),
+                ],
+            ],
+            "adm_main",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("adm_wd_"))
+async def cq_adm_wd_list(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    status = {"adm_wd_all": None, "adm_wd_pending": "pending"}.get(cb.data)
+    rows = db.list_withdrawals(status=status, limit=15)
+    if not rows:
+        await cb.answer("Выводов нет", show_alert=True)
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    label = {"pending": "⏳", "paid": "✅", "rejected": "❌"}
+    lines = []
+    kb = []
+    for r in rows:
+        user = db.get_user(r["user_id"])
+        uname = f"@{user['username']}" if user and user["username"] else f"ID {r['user_id']}"
+        lines.append(
+            f"#{r['id']} {label.get(r['status'], '')} · {r['amount']} {cur} · "
+            f"{uname} · {r['created_at'][:10]}"
+        )
+        kb.append(
+            [InlineKeyboardButton(text=f"👀 №{r['id']}", callback_data=f"adm_wdshow:{r['id']}")]
+        )
+    await cb.answer()
+    await cb.message.edit_text(
+        "💸 Выводы:\n\n" + "\n".join(lines),
+        reply_markup=admin_sub_kb(kb, "adm_wd"),
+    )
+
+
+@router.callback_query(F.data.startswith("adm_wdshow:"))
+async def cq_adm_wdshow(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    wd_id = int(cb.data.split(":")[1])
+    wd = db.get_withdrawal(wd_id)
+    if not wd:
+        await cb.answer("Вывод не найден", show_alert=True)
+        return
+    await cb.answer()
+    kb = withdrawal_actions_kb(wd_id)
+    if wd.get("screenshot"):
+        await bot.send_photo(
+            cb.from_user.id,
+            photo=wd["screenshot"],
+            caption=format_wd(wd),
+            reply_markup=kb,
+        )
+    else:
+        await cb.message.answer(format_wd(wd), reply_markup=kb)
+
+
+@router.callback_query(F.data == "adm_bal")
+async def cq_adm_bal(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    await cb.message.edit_text(
+        "💼 Баланс пользователя:",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(text="➕ Начислить", callback_data="adm_bal_add"),
+                    InlineKeyboardButton(text="➖ Списать", callback_data="adm_bal_sub"),
+                ],
+                [InlineKeyboardButton(text="🔄 Обнулить", callback_data="adm_bal_zero")],
+            ],
+            "adm_main",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("adm_bal_"))
+async def cq_adm_bal_act(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    action = {
+        "adm_bal_add": "bal_add",
+        "adm_bal_sub": "bal_sub",
+        "adm_bal_zero": "bal_zero",
+    }.get(cb.data)
+    if not action:
+        return
+    await state.set_state(AdminPanel.target)
+    await state.update_data(ap_action=action)
+    await cb.answer()
+    await cb.message.edit_text("Введите ID или @юзернейм пользователя:")
+
+
+@router.callback_query(F.data == "adm_user")
+async def cq_adm_user(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminPanel.target)
+    await state.update_data(ap_action="user")
+    await cb.answer()
+    await cb.message.edit_text("Введите ID или @юзернейм пользователя:")
+
+
+@router.callback_query(F.data == "adm_codes")
+async def cq_adm_codes(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    await cb.message.edit_text(
+        "🎁 Промокоды:",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(text="📋 Список", callback_data="adm_codes_list"),
+                    InlineKeyboardButton(text="➕ Создать", callback_data="adm_codes_add"),
+                ],
+            ],
+            "adm_main",
+        ),
+    )
+
+
+@router.callback_query(F.data == "adm_codes_list")
+async def cq_adm_codes_list(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    rows = db.list_codes(limit=20)
+    if not rows:
+        await cb.answer("Промокодов нет", show_alert=True)
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    lines = []
+    for r in rows:
+        state = "✅ использован (x" + str(r["used_by"]) + ")" if r["used"] else "🆕 активен"
+        lines.append(f"{r['code']} — {r['amount']} {cur} — {state}")
+    await cb.answer()
+    await cb.message.edit_text(
+        "🎁 Промокоды:\n" + "\n".join(lines),
+        reply_markup=admin_sub_kb([], "adm_codes"),
+    )
+
+
+@router.callback_query(F.data == "adm_codes_add")
+async def cq_adm_codes_add(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminPanel.target)
+    await state.update_data(ap_action="code")
+    await cb.answer()
+    await cb.message.edit_text("Введите промокод (латиницей):")
+
+
+@router.callback_query(F.data == "adm_tasks")
+async def cq_adm_tasks(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    await cb.message.edit_text(
+        "📢 Задания:",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(text="📋 Список", callback_data="adm_tasks_list"),
+                    InlineKeyboardButton(text="➕ Создать", callback_data="adm_tasks_add"),
+                    InlineKeyboardButton(text="➖ Удалить", callback_data="adm_tasks_del"),
+                ],
+            ],
+            "adm_main",
+        ),
+    )
+
+
+@router.callback_query(F.data == "adm_tasks_list")
+async def cq_adm_tasks_list(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    rows = db.list_tasks(active=None)
+    if not rows:
+        await cb.answer("Заданий нет", show_alert=True)
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    lines = []
+    for t in rows:
+        state = "🟢 активно" if t["active"] else "🔴 отключено"
+        lines.append(f"#{t['id']} @{t['sponsor']} — {t['reward']} {cur} — {state}")
+    await cb.answer()
+    await cb.message.edit_text(
+        "📢 Задания:\n" + "\n".join(lines),
+        reply_markup=admin_sub_kb([], "adm_tasks"),
+    )
+
+
+@router.callback_query(F.data == "adm_tasks_add")
+async def cq_adm_tasks_add(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminPanel.target)
+    await state.update_data(ap_action="task_chan")
+    await cb.answer()
+    await cb.message.edit_text("Введите юзернейм канала (например: @channel):")
+
+
+@router.callback_query(F.data == "adm_tasks_del")
+async def cq_adm_tasks_del(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminPanel.amount)
+    await state.update_data(ap_action="task_del")
+    await cb.answer()
+    await cb.message.edit_text("Введите номер задания для удаления:")
+
+
+@router.callback_query(F.data == "adm_settings")
+async def cq_adm_settings(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    await cb.answer()
+    await cb.message.edit_text(
+        "⚙️ Настройки. Нажмите, чтобы изменить:",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(
+                        text=f"💵 Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}",
+                        callback_data="adm_set_minwd",
+                    ),
+                    InlineKeyboardButton(
+                        text=f"🎁 За вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} {cur}",
+                        callback_data="adm_set_join",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=f"👥 Бонус за инвайт: {db.get_setting('invite_bonus', 777)} {cur}",
+                        callback_data="adm_set_invite",
+                    ),
+                    InlineKeyboardButton(
+                        text=f"💱 Валюта: {cur}",
+                        callback_data="adm_set_currency",
+                    ),
+                ],
+                [InlineKeyboardButton(text="🔫 Скин для вывода", callback_data="adm_set_skin")],
+            ],
+            "adm_main",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("adm_set_"))
+async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    action = {
+        "adm_set_minwd": "set_minwd",
+        "adm_set_join": "set_join",
+        "adm_set_invite": "set_invite",
+        "adm_set_currency": "set_currency",
+        "adm_set_skin": "set_skin",
+    }.get(cb.data)
+    if not action:
+        return
+    await state.set_state(AdminPanel.amount)
+    await state.update_data(ap_action=action)
+    await cb.answer()
+    await cb.message.edit_text("Введите новое значение:")
+
+
+@router.message(AdminPanel.target, F.text)
+async def adm_panel_target(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    action = data.get("ap_action")
+    text = message.text.strip()
+
+    if action == "user":
+        user = resolve_user(text)
+        if not user:
+            await message.answer("Пользователь не найден. Попробуйте ещё раз.")
+            return
+        await state.clear()
+        cur = db.get_setting("currency", config.CURRENCY)
+        referrals = db.count_referrals(user["id"])
+        username = f"@{user['username']}" if user["username"] else "—"
+        link = f"https://t.me/{config.BOT_USERNAME}?start={user['id']}"
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="➕ Добавить баланс", callback_data=f"ub_add:{user['id']}"),
+                    InlineKeyboardButton(text="🔄 Обнулить", callback_data=f"ub_zero:{user['id']}"),
+                ],
+                [InlineKeyboardButton(text="💸 Активные выводы", callback_data=f"ub_wd:{user['id']}")],
+            ]
+        )
+        await message.answer(
+            f"👤 Информация о пользователе\n"
+            f"ID: {user['id']}\n"
+            f"Имя: {user['first_name']}\n"
+            f"Ник: {username}\n"
+            f"Баланс: {user['balance']} {cur}\n"
+            f"Пригласил: {referrals} чел.\n"
+            f"Пришёл по реф.: {user['ref_id'] if user['ref_id'] else '—'}\n"
+            f"🔗 {link}\n"
+            f"Дата регистрации: {user['created_at'][:16]}",
+            reply_markup=kb,
+        )
+        return
+
+    user = resolve_user(text)
+    if not user:
+        await message.answer("Пользователь не найден. Попробуйте ещё раз.")
+        return
+
+    if action in ("bal_add", "bal_sub", "bal_zero"):
+        await state.update_data(ap_target=user["id"])
+        if action == "bal_zero":
+            db.set_balance(user["id"], 0)
+            await state.clear()
+            await message.answer(
+                f"🔄 Баланс пользователя {user['first_name']} (@{user['username'] or user['id']}) обнулён."
+            )
+            return
+        verb = "начисления" if action == "bal_add" else "списания"
+        await state.set_state(AdminPanel.amount)
+        await message.answer(
+            f"Введите количество {db.get_setting('currency', config.CURRENCY)} для {verb}:"
+        )
+        return
+
+    if action == "code":
+        await state.update_data(ap_code=text.upper())
+        await state.set_state(AdminPanel.amount)
+        await message.answer("Введите количество голды за промокод:")
+        return
+
+    if action == "task_chan":
+        await state.update_data(ap_task_chan=text.lstrip("@"))
+        await state.set_state(AdminPanel.amount)
+        await message.answer("Введите количество голды за подписку:")
+        return
+
+
+@router.message(AdminPanel.amount, F.text)
+async def adm_panel_amount(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    action = data.get("ap_action")
+    cur = db.get_setting("currency", config.CURRENCY)
+
+    def parse_num(t):
+        return float(t.replace(",", ".").strip())
+
+    if action == "task_del":
+        num = message.text.strip()
+        if not num.isdigit():
+            await message.answer("Введите номер задания числом.")
+            return
+        task = db.get_task(int(num))
+        if not task:
+            await message.answer("Задание не найдено.")
+            return
+        db.deactivate_task(int(num))
+        await state.clear()
+        await message.answer(f"Задание #{num} отключено.")
+        return
+
+    try:
+        value = parse_num(message.text)
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+
+    if action == "set_currency":
+        db.set_setting("currency", message.text.strip())
+        await state.clear()
+        await message.answer(f"💱 Валюта: {message.text.strip()}.")
+        return
+    if action == "set_skin":
+        db.set_setting("withdraw_skin", message.text.strip())
+        await state.clear()
+        await message.answer(f"🔫 Скин для вывода: {message.text.strip()}.")
+        return
+
+    if action == "bal_add":
+        db.add_balance(data["ap_target"], value)
+        await state.clear()
+        await message.answer(f"➕ Начислено +{value:g} {cur}.")
+    elif action == "bal_sub":
+        db.spend_balance(data["ap_target"], value)
+        await state.clear()
+        await message.answer(f"➖ Списано −{value:g} {cur}.")
+    elif action == "code":
+        db.add_code(data["ap_code"], int(value))
+        await state.clear()
+        await message.answer(f"🎁 Промокод {data['ap_code']} создан на {int(value)} {cur}.")
+    elif action == "task_rew":
+        task_id = db.add_task(data["ap_task_chan"], int(value))
+        await state.clear()
+        await message.answer(
+            f"📢 Задание #{task_id} создано: подписка на @{data['ap_task_chan']} = {int(value)} {cur}.\n"
+            "Не забудь добавить бота в этот канал/чат."
+        )
+    elif action == "set_minwd":
+        db.set_setting("min_withdraw", int(value))
+        await state.clear()
+        await message.answer(f"💵 Мин. вывод: {int(value)} {cur}.")
+    elif action == "set_join":
+        db.set_setting("reward_join", int(value))
+        await state.clear()
+        await message.answer(f"🎁 Награда за вступление: {int(value)} {cur}.")
+    elif action == "set_invite":
+        db.set_setting("invite_bonus", int(value))
+        await state.clear()
+        await message.answer(f"👥 Бонус за реферальную ссылку: {int(value)} {cur}.")
+    else:
+        await state.clear()
+        await message.answer("Действие устарело. Откройте /a заново.")
 
 
 def resolve_user(value):
