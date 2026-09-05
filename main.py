@@ -1214,12 +1214,6 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         )
         return
 
-    try:
-        value = parse_num(message.text)
-    except ValueError:
-        await message.answer("Введите число.")
-        return
-
     if action == "set_currency":
         db.set_setting("currency", message.text.strip())
         await state.clear()
@@ -1229,6 +1223,12 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.set_setting("withdraw_skin", message.text.strip())
         await state.clear()
         await message.answer(f"🔫 Скин для вывода: {message.text.strip()}.")
+        return
+
+    try:
+        value = parse_num(message.text)
+    except ValueError:
+        await message.answer("Введите число.")
         return
 
     if action == "bal_add":
