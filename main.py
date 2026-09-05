@@ -26,6 +26,7 @@ logging.basicConfig(level=logging.INFO)
 
 router = Router()
 bot = None
+last_bet = {}
 
 
 class Withdraw(StatesGroup):
@@ -375,7 +376,7 @@ async def cq_adm_bal(cb: CallbackQuery):
         return
     await cb.answer()
     await cb.message.edit_text(
-        "💼 Баланс пользователя:",
+        "💼 Баланс:",
         reply_markup=admin_sub_kb(
             [
                 [
@@ -383,8 +384,29 @@ async def cq_adm_bal(cb: CallbackQuery):
                     InlineKeyboardButton(text="➖ Списать", callback_data="adm_bal_sub"),
                 ],
                 [InlineKeyboardButton(text="🔄 Обнулить", callback_data="adm_bal_zero")],
+                [InlineKeyboardButton(text="🌐 Для всех", callback_data="adm_bal_all")],
             ],
             "adm_main",
+        ),
+    )
+
+
+@router.callback_query(F.data == "adm_bal_all")
+async def cq_adm_bal_all(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    await cb.message.edit_text(
+        "🌐 Глобальные действия. Балансы админов не затрагиваются:",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(text="➕ Всем прибавить", callback_data="adm_bal_all_add"),
+                    InlineKeyboardButton(text="➖ Всем убрать", callback_data="adm_bal_all_sub"),
+                ],
+                [InlineKeyboardButton(text="💥 Обнулить ВСЕМ", callback_data="adm_bal_all_zero")],
+            ],
+            "adm_bal",
         ),
     )
 
@@ -397,13 +419,56 @@ async def cq_adm_bal_act(cb: CallbackQuery, state: FSMContext):
         "adm_bal_add": "bal_add",
         "adm_bal_sub": "bal_sub",
         "adm_bal_zero": "bal_zero",
+        "adm_bal_all_add": "all_add",
+        "adm_bal_all_sub": "all_sub",
     }.get(cb.data)
     if not action:
+        return
+    if action in ("all_add", "all_sub"):
+        await state.set_state(AdminPanel.amount)
+        await state.update_data(ap_action=action)
+        await cb.answer()
+        await cb.message.edit_text(
+            "Введите сумму (прибавить/убрать у всех):"
+        )
         return
     await state.set_state(AdminPanel.target)
     await state.update_data(ap_action=action)
     await cb.answer()
     await cb.message.edit_text("Введите ID или @юзернейм пользователя:")
+
+
+@router.callback_query(F.data == "adm_bal_all_zero")
+async def cq_adm_bal_all_zero(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    await cb.message.edit_text(
+        "⚠️ Обнулить баланс ВСЕМ пользователям (кроме админов)?",
+        reply_markup=admin_sub_kb(
+            [
+                [
+                    InlineKeyboardButton(
+                        text="✅ Да, обнулить всем",
+                        callback_data="adm_bal_all_zero_go",
+                    ),
+                ],
+            ],
+            "adm_bal_all",
+        ),
+    )
+
+
+@router.callback_query(F.data == "adm_bal_all_zero_go")
+async def cq_adm_bal_all_zero_go(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    n = db.reset_all_balances(config.ADMIN_IDS)
+    await cb.answer()
+    await cb.message.edit_text(
+        f"💥 Обнулён баланс {n} пользователям.",
+        reply_markup=admin_sub_kb([], "adm_bal"),
+    )
 
 
 @router.callback_query(F.data == "adm_user")
@@ -740,6 +805,14 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.spend_balance(data["ap_target"], value)
         await state.clear()
         await message.answer(f"➖ Списано −{fmt_num(value)} {cur}.")
+    elif action == "all_add":
+        n = db.add_balance_all(value, config.ADMIN_IDS)
+        await state.clear()
+        await message.answer(f"🌐 Добавлено +{fmt_num(value)} {cur} {n} пользователям.")
+    elif action == "all_sub":
+        n = db.subtract_balance_all(value, config.ADMIN_IDS)
+        await state.clear()
+        await message.answer(f"🌐 Убрано −{fmt_num(value)} {cur} у {n} пользователей.")
     elif action == "code":
         await state.update_data(ap_code_amount=int(value))
         uses_kb = admin_sub_kb(
@@ -1213,30 +1286,67 @@ async def roulette_bet(message: Message, state: FSMContext):
         await message.answer("На балансе недостаточно голды.")
         return
 
+    await state.clear()
+    last_bet[message.from_user.id] = amount
+    text = play_roulette(message.from_user.id, amount)
+    await message.answer(text, reply_markup=roulette_result_kb())
+
+
+def roulette_result_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Играть ещё (та же ставка)", callback_data="roulette_again")],
+            [InlineKeyboardButton(text="🎰 Другая ставка", callback_data="roulette_change")],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+
+
+def play_roulette(user_id, amount):
+    cur = db.get_setting("currency", config.CURRENCY)
     chance = db.get_setting("roulette_chance", config.DEFAULT_ROULETTE_CHANCE)
     mult = db.get_setting("roulette_mult", config.DEFAULT_ROULETTE_MULT)
     win = random.randint(1, 100) <= int(chance)
-    await state.clear()
-
-    if not db.spend_balance(message.from_user.id, amount):
-        await message.answer("На балансе недостаточно голды.")
-        return
-
+    if not db.spend_balance(user_id, amount):
+        return "На балансе недостаточно голды."
     if win:
         payout = amount * mult
-        db.add_balance(message.from_user.id, payout)
-        await message.answer(
+        db.add_balance(user_id, payout)
+        return (
             f"🎉 Вы выиграли!\n"
             f"Ставка: {fmt_num(amount)} {cur}\n"
-            f"Выплата: +{fmt_num(payout)} {cur} 💰\n\n"
-            f"Играйте ещё!", reply_markup=main_menu()
+            f"Выплата: +{fmt_num(payout)} {cur} 💰"
         )
-    else:
-        await message.answer(
-            f"💸 Вы проиграли −{fmt_num(amount)} {cur}.\n"
-            f"Не расстраивайтесь, попробуйте ещё раз!",
-            reply_markup=main_menu(),
-        )
+    return (
+        f"💸 Вы проиграли −{fmt_num(amount)} {cur}.\n"
+        f"Не расстраивайтесь, попробуйте ещё раз!"
+    )
+
+
+@router.callback_query(F.data == "roulette_again")
+async def cq_roulette_again(cb: CallbackQuery):
+    await cb.answer()
+    amount = last_bet.get(cb.from_user.id)
+    if not amount:
+        await cb.message.answer("Ставка не найдена. Сделайте новую ставку.")
+        return
+    user = db.get_user(cb.from_user.id)
+    if user["balance"] < amount:
+        await cb.message.answer("На балансе недостаточно голды.")
+        return
+    text = play_roulette(cb.from_user.id, amount)
+    await cb.message.answer(text, reply_markup=roulette_result_kb())
+
+
+@router.callback_query(F.data == "roulette_change")
+async def cq_roulette_change(cb: CallbackQuery, state: FSMContext):
+    await cq_roulette(cb, state)
+
+
+@router.callback_query(F.data == "back_to_menu")
+async def cq_back_to_menu(cb: CallbackQuery):
+    await cb.answer()
+    await cb.message.edit_text("Главное меню:", reply_markup=main_menu())
 
 
 @router.callback_query(F.data.startswith("task_info:"))
