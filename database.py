@@ -18,61 +18,13 @@ def _dict_factory(cursor, row):
     return {cursor.description[i][0]: row[i] for i in range(len(row))}
 
 
-_pg_free = []
-_pg_lock = threading.Lock()
-_PG_MAX_IDLE = 8
-
-
-def _pg_connect():
-    return psycopg.connect(
-        config.DATABASE_URL,
-        row_factory=dict_row,
-        connect_timeout=15,
-    )
-
-
 def connect():
     if USE_PG:
-        conn = None
-        with _pg_lock:
-            while _pg_free:
-                cand = _pg_free.pop()
-                if not cand.closed:
-                    conn = cand
-                    break
-        if conn is None:
-            conn = _pg_connect()
-        try:
-            conn.rollback()
-        except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            conn = _pg_connect()
-
-        orig_close = conn.close
-
-        def _release():
-            try:
-                conn.rollback()
-            except Exception:
-                try:
-                    orig_close()
-                except Exception:
-                    pass
-                return
-            with _pg_lock:
-                if len(_pg_free) < _PG_MAX_IDLE:
-                    _pg_free.append(conn)
-                    return
-            try:
-                orig_close()
-            except Exception:
-                pass
-
-        conn.close = _release
-        return conn
+        return psycopg.connect(
+            config.DATABASE_URL,
+            row_factory=dict_row,
+            connect_timeout=15,
+        )
 
     conn = sqlite3.connect(config.DATABASE_PATH)
     conn.row_factory = _dict_factory
@@ -146,6 +98,7 @@ def init():
             "init() failed: could not reach PostgreSQL to validate schema"
         )
     else:
+        conn = connect()
         conn.execute("PRAGMA journal_mode = WAL")
         with conn:
             conn.execute(
@@ -734,3 +687,34 @@ def stats():
         "total_referrals": total_referrals,
         "pending_wds": pending_wds,
     }
+
+
+if USE_PG:
+
+    def _retry(func):
+        import functools
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except psycopg.OperationalError:
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    for _name in (
+        "set_setting", "get_setting", "add_user", "get_user",
+        "get_user_by_username", "count_referrals", "add_balance",
+        "spend_balance", "set_balance", "update_streak", "add_balance_all",
+        "subtract_balance_all", "reset_all_balances", "add_roulette_win",
+        "top_balance", "top_referrals", "top_roulette", "add_withdrawal",
+        "get_withdrawal", "set_withdrawal_status", "list_withdrawals",
+        "list_user_withdrawals", "add_code", "get_code", "delete_code",
+        "use_code", "list_codes", "get_all_user_ids",
+        "set_promo_last_created", "set_ban", "set_mute", "add_task",
+        "get_task", "list_tasks", "deactivate_task", "get_completion",
+        "add_completion", "set_completion_rewarded",
+        "list_completions_rewarded", "stats",
+    ):
+        globals()[_name] = _retry(globals()[_name])
