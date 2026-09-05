@@ -49,7 +49,6 @@ class AdminBalance(StatesGroup):
 def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Подать заявку", callback_data="start_form")],
             [
                 InlineKeyboardButton(text="👛 Мой баланс", callback_data="balance"),
                 InlineKeyboardButton(text="💸 Вывести", callback_data="start_withdraw"),
