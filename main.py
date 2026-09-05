@@ -746,41 +746,94 @@ async def wd_screenshot_other(message: Message):
 @router.callback_query(F.data.startswith("wd_"))
 async def cq_wd_action(cb: CallbackQuery):
     action, wd_id = cb.data.split(":")
-    wd = db.get_withdrawal(int(wd_id))
+    cur = db.get_setting("currency", config.CURRENCY)
+
+    try:
+        wd = db.get_withdrawal(int(wd_id))
+    except Exception:
+        logging.exception("Failed to load withdrawal")
+        wd = None
+
     if not wd:
-        await cb.answer("Заявка не найдена", show_alert=True)
+        await cb.answer("Вывод не найден", show_alert=True)
+        return
+    if wd["status"] != "pending":
+        await cb.answer("Вывод уже обработан", show_alert=True)
         return
 
+    await cb.answer()
     chat_id = cb.message.chat.id
     msg_id = cb.message.message_id
 
-    if action == "wd_approve":
-        if not db.spend_balance(wd["user_id"], wd["amount"]):
-            await cb.answer("Недостаточно средств у пользователя", show_alert=True)
+    try:
+        if action == "wd_approve":
+            if not db.spend_balance(wd["user_id"], wd["amount"]):
+                await cb.message.answer(
+                    f"⚠️ У пользователя недостаточно средств для выплаты №{wd_id}."
+                )
+                return
+            db.set_withdrawal_status(int(wd_id), "paid")
+            status_text = "✅ ВЫПЛАЧЕН"
+            user_note = (
+                f"💰 Ваш вывод №{wd_id} ({wd['amount']} {cur}) одобрен и выплачен!"
+            )
+        elif action == "wd_reject":
+            choose_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="💾 Оставить баланс",
+                            callback_data=f"wd_rejkeep:{wd_id}",
+                        ),
+                        InlineKeyboardButton(
+                            text="🗑 Обнулить баланс",
+                            callback_data=f"wd_rejzero:{wd_id}",
+                        ),
+                    ]
+                ]
+            )
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id, msg_id, reply_markup=choose_kb
+                )
+            except Exception:
+                pass
+            await cb.message.answer(
+                f"Вывод №{wd_id}: выберите вариант отклонения."
+            )
             return
-        db.set_withdrawal_status(int(wd_id), "paid")
-        caption = format_wd(wd) + "\n\nСтатус: ✅ ВЫПЛАЧЕН"
-        try:
-            await bot.edit_message_caption(chat_id, msg_id, caption=caption)
-        except Exception:
-            await cb.message.edit_text(caption)
-        cur = db.get_setting("currency", config.CURRENCY)
-        await bot.send_message(
-            wd["user_id"],
-            f"💰 Ваш вывод №{wd_id} ({wd['amount']} {cur}) одобрен и выплачен!",
+        elif action == "wd_rejkeep":
+            db.set_withdrawal_status(int(wd_id), "rejected")
+            status_text = "❌ ОТКЛОНЁН (баланс сохранён)"
+            user_note = (
+                f"❌ Ваш вывод №{wd_id} отклонён.\n"
+                "Средства остались на вашем балансе."
+            )
+        else:
+            db.set_balance(wd["user_id"], 0)
+            db.set_withdrawal_status(int(wd_id), "rejected")
+            status_text = "❌ ОТКЛОНЁН (баланс обнулён)"
+            user_note = (
+                f"❌ Ваш вывод №{wd_id} отклонён.\n"
+                "Баланс обнулён. Свяжитесь с нами для уточнения."
+            )
+    except Exception:
+        logging.exception("Failed to process withdrawal %s", wd_id)
+        await cb.message.answer(f"⚠️ Ошибка при обработке вывода №{wd_id}. Смотри логи.")
+        return
+
+    try:
+        await bot.edit_message_caption(
+            chat_id, msg_id, caption=format_wd(wd) + f"\n\nСтатус: {status_text}"
         )
-    else:
-        db.set_withdrawal_status(int(wd_id), "rejected")
-        caption = format_wd(wd) + "\n\nСтатус: ❌ ОТКЛОНЁН"
-        try:
-            await bot.edit_message_caption(chat_id, msg_id, caption=caption)
-        except Exception:
-            await cb.message.edit_text(caption)
-        await bot.send_message(
-            wd["user_id"],
-            f"❌ Ваш вывод №{wd_id} отклонён. Свяжитесь с нами для уточнения.",
-        )
-    await cb.answer()
+    except Exception:
+        pass
+    try:
+        await bot.send_message(wd["user_id"], user_note)
+    except Exception:
+        logging.exception("User notify failed for %s", wd["user_id"])
+
+    await cb.message.answer(f"Вывод №{wd_id}: {status_text}.")
 
 
 async def activate_promo(user_id, code_text):
