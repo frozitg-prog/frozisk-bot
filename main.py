@@ -199,13 +199,13 @@ def resolve_user(value):
     return None
 
 
-@router.message(Command("userbalance"))
+@router.message(Command("user"))
 async def cmd_userbalance(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     user = resolve_user(command.args)
     if not user:
-        await message.answer("Использование: /userbalance <id или @юзернейм>")
+        await message.answer("Использование: /user <id или @юзернейм>")
         return
     cur = db.get_setting("currency", config.CURRENCY)
     referrals = db.count_referrals(user["id"])
@@ -254,7 +254,7 @@ async def admin_balance_amount(message: Message, state: FSMContext):
     target = data.get("ub_target")
     if not target:
         await state.clear()
-        await message.answer("Действие устарело. Откройте /userbalance заново.")
+        await message.answer("Действие устарело. Откройте /user заново.")
         return
     text = message.text.replace(",", ".") if message.text else ""
     if not text.isdigit():
