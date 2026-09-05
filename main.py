@@ -86,6 +86,8 @@ def is_admin(user_id):
 
 def fmt_num(v):
     f = float(v)
+    if abs(f) >= 1_000_000_000:
+        return _word_amount(f / 1_000_000_000, ["миллиард", "миллиарда", "миллиардов"])
     if abs(f) >= 1_000_000:
         return _word_amount(f / 1_000_000, ["миллион", "миллиона", "миллионов"])
     if abs(f) >= 1_000:
@@ -105,11 +107,12 @@ def _trim_dec(d):
 
 
 def _word_amount(d, forms):
-    s = _trim_dec(d)
-    n = int(d)
-    if d != int(d):
+    rd = round(d, 2)
+    s = _trim_dec(rd)
+    if rd != int(rd):
         word = forms[1]
     else:
+        n = int(rd)
         mod = n % 10
         if mod == 1 and n % 100 != 11:
             word = forms[0]
