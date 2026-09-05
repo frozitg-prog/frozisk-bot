@@ -71,6 +71,13 @@ def is_admin(user_id):
     return user_id in config.ADMIN_IDS
 
 
+def fmt_num(v):
+    f = float(v)
+    if f.is_integer():
+        return str(int(f))
+    return f"{f:.8f}".rstrip("0").rstrip(".")
+
+
 def admin_main_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -115,7 +122,7 @@ def format_wd(wd):
     cur = db.get_setting("currency", config.CURRENCY)
     return (
         f"Заявка на вывод №{wd['id']}\n"
-        f"Цена: {wd['amount']} {cur}\n"
+        f"Цена: {fmt_num(wd['amount'])} {cur}\n"
         f"Скин / паттерн: {wd.get('skin') or '—'}\n"
         f"Пользователь: {name} ({username})\n"
         f"Дата: {wd['created_at']}"
@@ -170,7 +177,7 @@ async def cmd_stats(message: Message):
         f"📊 Статистика\n"
         f"Пользователей: {s['users']}\n"
         f"Рефералов приведено: {s['total_referrals']}\n"
-        f"Общий баланс: {s['total_balance']:g} {cur}\n"
+        f"Общий баланс: {fmt_num(s['total_balance'])} {cur}\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
         f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} "
         f"{db.get_setting('currency', config.CURRENCY)}\n"
@@ -223,7 +230,7 @@ async def cmd_codes(message: Message):
         total = r.get("max_uses") if r.get("max_uses") is not None else 1
         left = "∞" if total == 0 else max(total - r["used"], 0)
         state = "✅ использован" if total != 0 and r["used"] >= total else f"🆕 {r['used']}/{total}"
-        lines.append(f"{r['code']} — {r['amount']} {cur} — {state}")
+        lines.append(f"{r['code']} — {fmt_num(r['amount'])} {cur} — {state}")
     await message.answer("🎁 Промокоды:\n" + "\n".join(lines))
 
 
@@ -281,7 +288,7 @@ async def cq_adm_stats(cb: CallbackQuery):
         f"📊 Статистика\n"
         f"Пользователей: {s['users']}\n"
         f"Рефералов приведено: {s['total_referrals']}\n"
-        f"Общий баланс: {s['total_balance']:g} {cur}\n"
+        f"Общий баланс: {fmt_num(s['total_balance'])} {cur}\n"
         f"Выводов в ожидании: {s['pending_wds']}\n\n"
         f"Награда за вступление: {db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN)} {cur}\n"
         f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}\n"
@@ -327,7 +334,7 @@ async def cq_adm_wd_list(cb: CallbackQuery):
         user = db.get_user(r["user_id"])
         uname = f"@{user['username']}" if user and user["username"] else f"ID {r['user_id']}"
         lines.append(
-            f"#{r['id']} {label.get(r['status'], '')} · {r['amount']} {cur} · "
+            f"#{r['id']} {label.get(r['status'], '')} · {fmt_num(r['amount'])} {cur} · "
             f"{uname} · {r['created_at'][:10]}"
         )
         kb.append(
@@ -446,7 +453,7 @@ async def cq_adm_codes_list(cb: CallbackQuery):
             state = f"✅ {r['used']}/{total} использован"
         else:
             state = f"🆕 {r['used']}/{total}"
-        lines.append(f"{r['code']} — {r['amount']} {cur} — {state}")
+        lines.append(f"{r['code']} — {fmt_num(r['amount'])} {cur} — {state}")
     await cb.answer()
     await cb.message.edit_text(
         "🎁 Промокоды:\n" + "\n".join(lines),
@@ -576,7 +583,7 @@ async def cq_adm_settings(cb: CallbackQuery):
                 ],
                 [InlineKeyboardButton(text="🔫 Скин для вывода", callback_data="adm_set_skin")],
                 [InlineKeyboardButton(text=f"🎰 Шанс рулетки: {chance}%", callback_data="adm_set_roulette")],
-                [InlineKeyboardButton(text=f"🎲 Множитель рулетки: x{mult:g}", callback_data="adm_set_mult")],
+                [InlineKeyboardButton(text=f"🎲 Множитель рулетки: x{fmt_num(mult)}", callback_data="adm_set_mult")],
                 [InlineKeyboardButton(text=f"🔥 Стрик 1-й день: {db.get_setting('streak_base', config.DEFAULT_STREAK_BASE)} {cur}", callback_data="adm_set_streak_base")],
                 [InlineKeyboardButton(text=f"🔥 Стрик прирост/день: +{db.get_setting('streak_step', config.DEFAULT_STREAK_STEP)} {cur}", callback_data="adm_set_streak_step")],
             ],
@@ -728,11 +735,11 @@ async def adm_panel_amount(message: Message, state: FSMContext):
     if action == "bal_add":
         db.add_balance(data["ap_target"], value)
         await state.clear()
-        await message.answer(f"➕ Начислено +{value:g} {cur}.")
+        await message.answer(f"➕ Начислено +{fmt_num(value)} {cur}.")
     elif action == "bal_sub":
         db.spend_balance(data["ap_target"], value)
         await state.clear()
-        await message.answer(f"➖ Списано −{value:g} {cur}.")
+        await message.answer(f"➖ Списано −{fmt_num(value)} {cur}.")
     elif action == "code":
         await state.update_data(ap_code_amount=int(value))
         uses_kb = admin_sub_kb(
@@ -781,7 +788,7 @@ async def adm_panel_amount(message: Message, state: FSMContext):
     elif action == "set_mult":
         db.set_setting("roulette_mult", value)
         await state.clear()
-        await message.answer(f"🎲 Множитель рулетки: x{value:g}.")
+        await message.answer(f"🎲 Множитель рулетки: x{fmt_num(value)}.")
     elif action == "set_streak_base":
         db.set_setting("streak_base", int(value))
         await state.clear()
@@ -909,7 +916,7 @@ async def cq_ub_wd(cb: CallbackQuery):
     lines = []
     for r in rows:
         lines.append(
-            f"#{r['id']} {label.get(r['status'], r['status'])} · {r['amount']} {cur} · "
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {fmt_num(r['amount'])} {cur} · "
             f"🎮 {r.get('skin') or '—'} · {r['created_at'][:16]}\n"
             f"    📋 /withdraw {r['id']}"
         )
@@ -934,7 +941,7 @@ async def cmd_userwithdrawals(message: Message, command: CommandObject):
     lines = []
     for r in rows:
         lines.append(
-            f"#{r['id']} {label.get(r['status'], r['status'])} · {r['amount']} {cur} · "
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {fmt_num(r['amount'])} {cur} · "
             f"🎮 {r.get('skin') or '—'} · {r['created_at'][:16]}\n"
             f"    📋 /withdraw {r['id']}"
         )
@@ -1009,7 +1016,7 @@ async def cmd_withdrawals(message: Message, command: CommandObject):
         user = db.get_user(r["user_id"])
         uname = f"@{user['username']}" if user and user["username"] else f"ID {r['user_id']}"
         lines.append(
-            f"#{r['id']} {label.get(r['status'], r['status'])} · {r['amount']} {cur}\n"
+            f"#{r['id']} {label.get(r['status'], r['status'])} · {fmt_num(r['amount'])} {cur}\n"
             f"    🎮 {r.get('skin') or '—'} · {uname}\n"
             f"    🕒 {r['created_at'][:16]}"
         )
@@ -1184,7 +1191,7 @@ async def cq_roulette(cb: CallbackQuery, state: FSMContext):
         f"🎰 Рулетка\n"
         f"Ставка: от {min_bet} {cur}\n"
         f"Шанс победы: {chance}%\n"
-        f"Выигрыш: ставка ×{mult:g}\n\n"
+        f"Выигрыш: ставка ×{fmt_num(mult)}\n\n"
         f"Введите сумму ставки:"
     )
 
@@ -1220,13 +1227,13 @@ async def roulette_bet(message: Message, state: FSMContext):
         db.add_balance(message.from_user.id, payout)
         await message.answer(
             f"🎉 Вы выиграли!\n"
-            f"Ставка: {amount:g} {cur}\n"
-            f"Выплата: +{payout:g} {cur} 💰\n\n"
+            f"Ставка: {fmt_num(amount)} {cur}\n"
+            f"Выплата: +{fmt_num(payout)} {cur} 💰\n\n"
             f"Играйте ещё!", reply_markup=main_menu()
         )
     else:
         await message.answer(
-            f"💸 Вы проиграли −{amount:g} {cur}.\n"
+            f"💸 Вы проиграли −{fmt_num(amount)} {cur}.\n"
             f"Не расстраивайтесь, попробуйте ещё раз!",
             reply_markup=main_menu(),
         )
@@ -1439,7 +1446,7 @@ async def wd_screenshot(message: Message, state: FSMContext):
     cur = db.get_setting("currency", config.CURRENCY)
     await message.answer(
         f"✅ Заявка на вывод №{wd_id} отправлена!\n"
-        f"Цена: {data['amount']} {cur}\n"
+        f"Цена: {fmt_num(data['amount'])} {cur}\n"
         f"Скин: {data['skin']}\n"
         "Ожидайте, мы выплатим вам в ближайшее время.",
         reply_markup=main_menu(),
@@ -1483,7 +1490,7 @@ async def cq_wd_action(cb: CallbackQuery):
             db.set_withdrawal_status(int(wd_id), "paid")
             status_text = "✅ ВЫПЛАЧЕН"
             user_note = (
-                f"💰 Ваш вывод №{wd_id} ({wd['amount']} {cur}) одобрен и выплачен!"
+                f"💰 Ваш вывод №{wd_id} ({fmt_num(wd['amount'])} {cur}) одобрен и выплачен!"
             )
         elif action == "wd_reject":
             choose_kb = InlineKeyboardMarkup(
@@ -1550,7 +1557,7 @@ async def activate_promo(user_id, code_text):
         return None, f"Промокод {code} уже использован."
     if db.use_code(code, user_id):
         db.add_balance(user_id, pc["amount"])
-        return pc, f"🎉 Промокод {code} активирован!\nНачислено: +{pc['amount']} {cur} на баланс."
+        return pc, f"🎉 Промокод {code} активирован!\nНачислено: +{fmt_num(pc['amount'])} {cur} на баланс."
     return None, f"Промокод {code} уже использован вами."
 
 
