@@ -33,6 +33,14 @@ bot = None
 last_bet = {}
 promo_info = {}
 
+MINES_GRIDS = {
+    "6": (6, 5),
+    "8": (8, 10),
+    "9": (9, 12),
+}
+MINES_MULT = 1.5
+mines_games = {}
+
 _moderation_cache = {}
 _MOD_CACHE_TTL = 20
 
@@ -122,6 +130,11 @@ class Post(StatesGroup):
 
 class Roulette(StatesGroup):
     bet = State()
+
+
+class Mines(StatesGroup):
+    bet = State()
+    grid = State()
 
 
 def main_menu():
@@ -1819,6 +1832,45 @@ async def cmd_subbal(message: Message, command: CommandObject):
     )
 
 
+@router.message(Command("delbal"))
+async def cmd_delbal(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if len(args) != 2 or not args[1].isdigit():
+        await message.answer("Использование: /delbal <id или @ник> <количество G>")
+        return
+    user = resolve_user(args[0])
+    if not user:
+        await message.answer("Пользователь не найден.")
+        return
+    amount = int(args[1])
+    if not db.spend_balance(user["id"], amount):
+        await message.answer("Не удалось списать: недостаточно голды на балансе пользователя.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    await message.answer(
+        f"Списано −{fmt_num(args[1])} {cur} у пользователя {user['first_name']}"
+        f" (@{user['username'] or user['id']})."
+    )
+
+
+@router.message(Command("userbal"))
+async def cmd_userbal(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    user = resolve_user(command.args or "")
+    if not user:
+        await message.answer("Использование: /userbal <id или @юзернейм>")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    username = f"@{user['username']}" if user["username"] else f"{user['id']}"
+    await message.answer(
+        f"👤 Пользователь: {user['first_name']} ({username})\n"
+        f"💼 Баланс: {fmt_num(user['balance'])} {cur}"
+    )
+
+
 @router.message(Command("withdrawals"))
 async def cmd_withdrawals(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
@@ -2008,6 +2060,238 @@ async def cq_streak(cb: CallbackQuery):
 
 @router.callback_query(F.data == "roulette")
 async def cq_roulette(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎰 Классическая", callback_data="casino_classic"),
+                InlineKeyboardButton(text="💣 Сапёр", callback_data="casino_mines"),
+            ],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+    await cb.message.answer("🎰 Выберите тип казино:", reply_markup=kb)
+
+
+@router.callback_query(F.data == "casino_mines")
+async def cq_casino_mines(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.set_state(Mines.bet)
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    await cb.message.answer(
+        f"💣 Казино «Сапёр»\n"
+        f"Ставка: от {fmt_num(min_bet)} {cur}\n"
+        f"Выигрыш: каждый безопасный ход ×{fmt_num(MINES_MULT)}\n\n"
+        f"Введите сумму ставки:",
+        reply_markup=casino_mines_back_kb(),
+    )
+
+
+def casino_mines_back_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Поставить всё", callback_data="mines_all")],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+
+
+@router.callback_query(F.data == "mines_all")
+async def cq_mines_all(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    user = db.get_user(cb.from_user.id)
+    if not user:
+        await cb.message.answer("Сначала откройте меню командой /start.")
+        await state.clear()
+        return
+    balance = user["balance"]
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    if balance < min_bet:
+        await cb.message.answer(
+            f"Баланса не хватает даже на минимальную ставку "
+            f"({fmt_num(min_bet)} {db.get_setting('currency', config.CURRENCY)})."
+        )
+        return
+    await state.update_data(mines_bet=balance)
+    await show_mines_grid_choice(cb.message, state)
+
+
+@router.message(Mines.bet, F.text)
+async def mines_bet(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    if amount < min_bet:
+        await message.answer(f"Минимальная ставка: {fmt_num(min_bet)} {cur}.")
+        return
+    user = db.get_user(message.from_user.id)
+    if not user:
+        db.add_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "")
+        user = db.get_user(message.from_user.id)
+    if user["balance"] < amount:
+        await message.answer("На балансе недостаточно голды.")
+        return
+    await state.update_data(mines_bet=amount)
+    await show_mines_grid_choice(message, state)
+
+
+async def show_mines_grid_choice(message, state: FSMContext):
+    await state.set_state(Mines.grid)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="6×6 (5 мин)", callback_data="mines_grid:6"),
+                InlineKeyboardButton(text="8×8 (10 мин)", callback_data="mines_grid:8"),
+            ],
+            [
+                InlineKeyboardButton(text="9×9 (12 мин)", callback_data="mines_grid:9"),
+            ],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+    await message.answer("💣 Выберите размер поля:", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("mines_grid:"))
+async def cq_mines_grid(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    size = cb.data.split(":")[1]
+    if size not in MINES_GRIDS:
+        return
+    data = await state.get_data()
+    amount = data.get("mines_bet")
+    if not amount:
+        await state.clear()
+        await cb.message.answer("Действие устарело. Введите ставку заново.")
+        return
+    await state.clear()
+
+    n, mines_count = MINES_GRIDS[size]
+    user = db.get_user(cb.from_user.id)
+    if not user:
+        await cb.message.answer("Сначала откройте меню командой /start.")
+        return
+    if user["balance"] < amount:
+        await cb.message.answer("На балансе недостаточно голды.")
+        return
+    if not db.spend_balance(cb.from_user.id, amount):
+        await cb.message.answer("На балансе недостаточно голды.")
+        return
+
+    cells = list(range(n * n))
+    mines = set(random.sample(cells, mines_count))
+    mines_games[cb.from_user.id] = {
+        "n": n,
+        "mines": mines,
+        "revealed": set(),
+        "bet": amount,
+        "cur": amount,
+        "steps": 0,
+    }
+    await cb.message.answer(
+        f"💣 Сапёр {n}×{n} ({mines_count} мин)\n"
+        f"Ставка: {fmt_num(amount)} {db.get_setting('currency', config.CURRENCY)}\n"
+        f"Текущий выигрыш: {fmt_num(amount)} {db.get_setting('currency', config.CURRENCY)}\n"
+        f"Нажмите на клетку. После ≥1 хода можно забрать.",
+        reply_markup=render_mines_board(cb.from_user.id),
+    )
+
+
+def render_mines_board(uid):
+    game = mines_games.get(uid)
+    if not game:
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")]])
+    n = game["n"]
+    rows = []
+    for r in range(n):
+        row = []
+        for c in range(n):
+            idx = r * n + c
+            if idx in game["revealed"]:
+                row.append(InlineKeyboardButton(text="✅", callback_data="mines_noop"))
+            else:
+                row.append(InlineKeyboardButton(text="⬜", callback_data=f"mines_click:{idx}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text=f"💎 Забрать {fmt_num(game['cur'])}", callback_data="mines_cash")])
+    rows.append([InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("mines_click:"))
+async def cq_mines_click(cb: CallbackQuery):
+    await cb.answer()
+    game = mines_games.get(cb.from_user.id)
+    if not game:
+        await cb.message.answer("Игра не найдена. Начните заново.", reply_markup=casino_mines_back_kb())
+        return
+    idx = int(cb.data.split(":")[1])
+    if idx in game["revealed"]:
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    if idx in game["mines"]:
+        mines_games.pop(cb.from_user.id, None)
+        await cb.message.edit_text(
+            f"💥 Бум! Вы нажали на мину.\n"
+            f"Ставка {fmt_num(game['bet'])} {cur} потеряна.",
+            reply_markup=casino_mines_back_kb(),
+        )
+        return
+    game["revealed"].add(idx)
+    game["steps"] += 1
+    game["cur"] = round(game["cur"] * MINES_MULT, 2)
+    # проверим, не открыты ли все безопасные клетки
+    safe_total = game["n"] * game["n"] - len(game["mines"])
+    if len(game["revealed"]) >= safe_total:
+        win = game["cur"]
+        mines_games.pop(cb.from_user.id, None)
+        db.add_balance(cb.from_user.id, win)
+        await cb.message.edit_text(
+            f"🎉 Вы открыли все безопасные клетки!\n"
+            f"+{fmt_num(win)} {cur} начислено.",
+            reply_markup=casino_mines_back_kb(),
+        )
+        return
+    await cb.message.edit_text(
+        f"💣 Сапёр {game['n']}×{game['n']}\n"
+        f"Текущий выигрыш: {fmt_num(game['cur'])} {cur}\n"
+        f"Ход #{game['steps']}. Нажмите дальше или заберите.",
+        reply_markup=render_mines_board(cb.from_user.id),
+    )
+
+
+@router.callback_query(F.data == "mines_cash")
+async def cq_mines_cash(cb: CallbackQuery):
+    await cb.answer()
+    game = mines_games.get(cb.from_user.id)
+    if not game:
+        await cb.message.answer("Игра не найдена. Начните заново.", reply_markup=casino_mines_back_kb())
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    if game["steps"] < 1:
+        await cb.answer("Сначала сделайте хотя бы 1 ход.", show_alert=True)
+        return
+    win = game["cur"]
+    mines_games.pop(cb.from_user.id, None)
+    db.add_balance(cb.from_user.id, win)
+    await cb.message.edit_text(
+        f"✅ Вы забрали выигрыш: +{fmt_num(win)} {cur}",
+        reply_markup=casino_mines_back_kb(),
+    )
+
+
+@router.callback_query(F.data == "mines_noop")
+async def cq_mines_noop(cb: CallbackQuery):
+    await cb.answer()
+
+
+@router.callback_query(F.data == "casino_classic")
+async def cq_casino_classic(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     cur = db.get_setting("currency", config.CURRENCY)
     min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
