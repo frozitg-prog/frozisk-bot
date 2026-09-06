@@ -1964,6 +1964,19 @@ async def cmd_stickerid(message: Message):
     )
 
 
+@router.message(Command("setstick"))
+async def cmd_setstick(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    sid = (command.args or "").strip()
+    if not sid:
+        await message.answer("Использование: /setstick <file_id>")
+        return
+    db.set_setting("slots_sticker", sid)
+    db.set_setting("slots_custom_emoji", "")
+    await message.answer("✅ Стикер казино-слота сохранён!")
+
+
 @router.message(F.sticker)
 async def on_sticker(message: Message):
     if message.chat.type != "private":
