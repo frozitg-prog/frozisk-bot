@@ -2045,6 +2045,9 @@ async def roulette_bet(message: Message, state: FSMContext):
         await message.answer(f"Минимальная ставка: {fmt_num(min_bet)} {cur}.")
         return
     user = db.get_user(message.from_user.id)
+    if not user:
+        db.add_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "")
+        user = db.get_user(message.from_user.id)
     if user["balance"] < amount:
         await message.answer("На балансе недостаточно голды.")
         return
@@ -2117,6 +2120,9 @@ async def cq_roulette_again(cb: CallbackQuery):
         await cb.message.answer("Ставка не найдена. Сделайте новую ставку.")
         return
     user = db.get_user(cb.from_user.id)
+    if not user:
+        db.add_user(cb.from_user.id, cb.from_user.username or "", cb.from_user.first_name or "")
+        user = db.get_user(cb.from_user.id)
     if user["balance"] < amount:
         await cb.message.answer("На балансе недостаточно голды.")
         return
