@@ -129,17 +129,24 @@ def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="👛 Мой баланс", callback_data="balance"),
-                InlineKeyboardButton(text="💸 Вывести", callback_data="start_withdraw"),
-                InlineKeyboardButton(text="🎰 Рулетка", callback_data="roulette"),
+                InlineKeyboardButton(text="Мой баланс", callback_data="balance",
+                                     icon_custom_emoji_id="5769403330761593044"),
+                InlineKeyboardButton(text="Вывести", callback_data="start_withdraw",
+                                     icon_custom_emoji_id="5967390100357648692"),
+                InlineKeyboardButton(text="Рулетка", callback_data="roulette",
+                                     icon_custom_emoji_id="5960608239623082921"),
             ],
             [
-                InlineKeyboardButton(text="🎁 Промокод", callback_data="promo_menu"),
-                InlineKeyboardButton(text="💰 Заработать голду", callback_data="earn_gold"),
+                InlineKeyboardButton(text="Промокод", callback_data="promo_menu",
+                                     icon_custom_emoji_id="6032937473162614352"),
+                InlineKeyboardButton(text="Заработать голду", callback_data="earn_gold",
+                                     icon_custom_emoji_id="5811989245761426317"),
             ],
             [
-                InlineKeyboardButton(text="🔥 Стрик", callback_data="streak"),
-                InlineKeyboardButton(text="🏆 Топ", callback_data="top"),
+                InlineKeyboardButton(text="Стрик", callback_data="streak",
+                                     icon_custom_emoji_id="6008118472066732010"),
+                InlineKeyboardButton(text="Топ", callback_data="top",
+                                     icon_custom_emoji_id="5961051261204696786"),
             ],
         ]
     )
@@ -2079,8 +2086,10 @@ async def cq_roulette(cb: CallbackQuery, state: FSMContext):
 def roulette_bet_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 Поставить всё", callback_data="roulette_all")],
-            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="Поставить всё", callback_data="roulette_all",
+                                  icon_custom_emoji_id="5963312935148195483")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu",
+                                  icon_custom_emoji_id="5875082500023258804")],
         ]
     )
 
@@ -2133,9 +2142,12 @@ async def roulette_all(cb: CallbackQuery, state: FSMContext):
 def roulette_result_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Играть ещё (та же ставка)", callback_data="roulette_again")],
-            [InlineKeyboardButton(text="🎰 Другая ставка", callback_data="roulette_change")],
-            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="Играть ещё (та же ставка)", callback_data="roulette_again",
+                                  icon_custom_emoji_id="5877410604225924969")],
+            [InlineKeyboardButton(text="Другая ставка", callback_data="roulette_change",
+                                  icon_custom_emoji_id="5960608239623082921")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu",
+                                  icon_custom_emoji_id="5875082500023258804")],
         ]
     )
 
