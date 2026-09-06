@@ -34,9 +34,10 @@ last_bet = {}
 promo_info = {}
 
 MINES_GRIDS = {
-    "6": (6, 5),
-    "8": (8, 10),
-    "9": (9, 12),
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
 }
 MINES_MULT = 1.5
 mines_games = {}
@@ -1271,6 +1272,10 @@ async def cq_adm_settings(cb: CallbackQuery):
                 [InlineKeyboardButton(text=f"🎁 Мин. сумма промо: {fmt_num(db.get_setting('promo_min_amount', config.DEFAULT_PROMO_MIN_AMOUNT))} {cur}", callback_data="adm_set_promo_min")],
                 [InlineKeyboardButton(text=f"🎁 Мин. активаций промо: {db.get_setting('promo_min_uses', config.DEFAULT_PROMO_MIN_USES)}", callback_data="adm_set_promo_uses")],
                 [InlineKeyboardButton(text=f"🎁 КД создания промо: {db.get_setting('promo_cd', config.DEFAULT_PROMO_CD)} сек", callback_data="adm_set_promo_cd")],
+                [InlineKeyboardButton(text=f"💣 Мин 3×3: {db.get_setting('mines_3', config.DEFAULT_MINES_3)} мин", callback_data="adm_set_mines_3")],
+                [InlineKeyboardButton(text=f"💣 Мин 4×4: {db.get_setting('mines_4', config.DEFAULT_MINES_4)} мин", callback_data="adm_set_mines_4")],
+                [InlineKeyboardButton(text=f"💣 Мин 5×5: {db.get_setting('mines_5', config.DEFAULT_MINES_5)} мин", callback_data="adm_set_mines_5")],
+                [InlineKeyboardButton(text=f"💣 Мин 6×6: {db.get_setting('mines_6', config.DEFAULT_MINES_6)} мин", callback_data="adm_set_mines_6")],
             ],
             "adm_main"))
 
@@ -1292,6 +1297,10 @@ async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
         "adm_set_promo_min": "set_promo_min",
         "adm_set_promo_uses": "set_promo_uses",
         "adm_set_promo_cd": "set_promo_cd",
+        "adm_set_mines_3": "set_mines_3",
+        "adm_set_mines_4": "set_mines_4",
+        "adm_set_mines_5": "set_mines_5",
+        "adm_set_mines_6": "set_mines_6",
     }.get(cb.data)
     if not action:
         return
@@ -1640,6 +1649,22 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         db.set_setting("promo_cd", cd)
         await state.clear()
         await message.answer(f"🎁 КД создания промо: {cd} сек (1 секунда — 1 час).")
+    elif action == "set_mines_3":
+        db.set_setting("mines_3", int(value))
+        await state.clear()
+        await message.answer(f"💣 Мины 3×3: {int(value)} мин.")
+    elif action == "set_mines_4":
+        db.set_setting("mines_4", int(value))
+        await state.clear()
+        await message.answer(f"💣 Мины 4×4: {int(value)} мин.")
+    elif action == "set_mines_5":
+        db.set_setting("mines_5", int(value))
+        await state.clear()
+        await message.answer(f"💣 Мины 5×5: {int(value)} мин.")
+    elif action == "set_mines_6":
+        db.set_setting("mines_6", int(value))
+        await state.clear()
+        await message.answer(f"💣 Мины 6×6: {int(value)} мин.")
     else:
         await state.clear()
         await message.answer("Действие устарело. Откройте /a заново.")
@@ -2143,14 +2168,19 @@ async def mines_bet(message: Message, state: FSMContext):
 
 async def show_mines_grid_choice(message, state: FSMContext):
     await state.set_state(Mines.grid)
+    mines_3 = db.get_setting("mines_3", config.DEFAULT_MINES_3)
+    mines_4 = db.get_setting("mines_4", config.DEFAULT_MINES_4)
+    mines_5 = db.get_setting("mines_5", config.DEFAULT_MINES_5)
+    mines_6 = db.get_setting("mines_6", config.DEFAULT_MINES_6)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="6×6 (5 мин)", callback_data="mines_grid:6"),
-                InlineKeyboardButton(text="8×8 (10 мин)", callback_data="mines_grid:8"),
+                InlineKeyboardButton(text=f"3×3 ({mines_3} мин)", callback_data="mines_grid:3"),
+                InlineKeyboardButton(text=f"4×4 ({mines_4} мин)", callback_data="mines_grid:4"),
             ],
             [
-                InlineKeyboardButton(text="9×9 (12 мин)", callback_data="mines_grid:9"),
+                InlineKeyboardButton(text=f"5×5 ({mines_5} мин)", callback_data="mines_grid:5"),
+                InlineKeyboardButton(text=f"6×6 ({mines_6} мин)", callback_data="mines_grid:6"),
             ],
             [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
         ]
@@ -2171,8 +2201,12 @@ async def cq_mines_grid(cb: CallbackQuery, state: FSMContext):
         await cb.message.answer("Действие устарело. Введите ставку заново.")
         return
     await state.clear()
+    n = MINES_GRIDS[size]
+    mines_key = f"mines_{size}"
+    mines_count = int(db.get_setting(mines_key, getattr(config, f"DEFAULT_MINES_{size}")))
+    if mines_count >= n * n - 1:
+        mines_count = n * n - 2
 
-    n, mines_count = MINES_GRIDS[size]
     user = db.get_user(cb.from_user.id)
     if not user:
         await cb.message.answer("Сначала откройте меню командой /start.")
