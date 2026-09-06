@@ -488,14 +488,21 @@ async def _fc_post(path, amount):
             pass
         return False
 
+    start_msg = None
     try:
-        await bot.send_message(
+        start_msg = await bot.send_message(
             group_id,
             f"🏁 ФАСТ-КОММЕНТ стартовал!\n"
             f"Первый комментарий в этой ветке забирает "
             f"<b>{fmt_num(amount)} {cur}</b>.\n\n"
             f"Ответьте на это сообщение — и вперёд 👇",
             message_thread_id=post_id,
+        )
+        logging.info(
+            "FC start: chat=%s requested_thread=%s actual_thread=%s mid=%s",
+            group_id, post_id,
+            getattr(start_msg, "message_thread_id", None),
+            start_msg.message_id,
         )
     except Exception:
         try:
@@ -513,6 +520,10 @@ async def _fc_post(path, amount):
         "channel_id": path,
         "group_id": group_id,
         "post_id": post_id,
+        "thread_id": (
+            getattr(start_msg, "message_thread_id", None) or post_id
+        ),
+        "start_msg_id": (start_msg.message_id if start_msg else None),
         "amount": amount,
         "started": time.time(),
     }
@@ -2702,15 +2713,18 @@ async def fc_waiter(message: Message):
         return
     if message.chat.type not in ("group", "supergroup"):
         return
-    if getattr(message, "message_thread_id", None) is not None:
+    if getattr(message, "message_thread_id", None) is not None and fc is not None:
         logging.info(
-            "FC dbg: chat=%s type=%s thread=%s active_fc=%s/%s",
-            message.chat.id, message.chat.type, message.message_thread_id,
+            "FC dbg: chat=%s thread=%s expecting_thread=%s/%s active_fc=%s/%s",
+            message.chat.id, message.message_thread_id,
+            fc.get("thread_id"), fc.get("post_id"),
             fc.get("group_id"), fc.get("post_id"),
         )
     if fc["group_id"] != message.chat.id:
         return
-    if getattr(message, "message_thread_id", None) != fc["post_id"]:
+    if getattr(message, "message_thread_id", None) is None:
+        return
+    if message.message_thread_id not in (fc["post_id"], fc.get("thread_id")):
         return
     if not message.from_user or message.from_user.is_bot:
         return
@@ -2723,9 +2737,10 @@ async def fc_waiter(message: Message):
     await _fc_cancel_task(fc.get("task"))
 
     winner = message.from_user
+    win_thread = getattr(message, "message_thread_id", None) or fc["thread_id"] or fc["post_id"]
     logging.info(
-        "FC win: user=%s chat=%s post=%s amount=%s",
-        winner.id, message.chat.id, fc["post_id"], fc["amount"],
+        "FC win: user=%s chat=%s post=%s thread=%s amount=%s",
+        winner.id, message.chat.id, fc["post_id"], win_thread, fc["amount"],
     )
     db.add_user(
         winner.id,
@@ -2753,10 +2768,19 @@ async def fc_waiter(message: Message):
             fc["group_id"],
             f"🥇 {nick} написал первым и забирает "
             f"<b>{fmt_num(fc['amount'])} {cur}</b>!\n\n📣 Победитель — {nick}!",
-            message_thread_id=fc["post_id"],
+            message_thread_id=win_thread,
         )
     except Exception:
-        pass
+        # падаем на обычный чат без топиков -> шлём в post-тред
+        try:
+            await bot.send_message(
+                fc["group_id"],
+                f"🥇 {nick} написал первым и забирает "
+                f"<b>{fmt_num(fc['amount'])} {cur}</b>!\n\n📣 Победитель — {nick}!",
+                message_thread_id=fc["post_id"],
+            )
+        except Exception:
+            pass
     try:
         await bot.send_message(
             fc["channel_id"],
