@@ -488,21 +488,49 @@ async def _fc_post(path, amount):
             pass
         return False
 
-    start_msg = None
+    thread_id = None
+
+    def _topic_supported(chat_type):
+        return chat_type in ("supergroup", "group")
+
     try:
-        start_msg = await bot.send_message(
+        # тип проверяем у самого чата комментариев (группа), не у канала
+        linked = await bot.get_chat(group_id)
+        if _topic_supported(linked.type):
+            from aiogram.methods import CreateForumTopic
+
+            res = await bot(CreateForumTopic(
+                chat_id=group_id,
+                name=f"🏁 Фаст-коммент {fmt_num(amount)} {cur}",
+            ))
+            thread_id = res.message_thread_id
+    except Exception:
+        logging.exception("FC create_forum_topic failed")
+
+    if thread_id is None:
+        try:
+            await bot.edit_message_text(
+                path,
+                post_id,
+                "⚠️ Бот не может создавать топики в чате комментариев. "
+                "Включите топики (темы) в чате комментариев.",
+            )
+        except Exception:
+            pass
+        return False
+
+    try:
+        await bot.send_message(
             group_id,
-            f"🏁 ФАСТ-КОММЕНТ стартовал!\n"
-            f"Первый комментарий в этой ветке забирает "
-            f"<b>{fmt_num(amount)} {cur}</b>.\n\n"
-            f"Ответьте на это сообщение — и вперёд 👇",
-            message_thread_id=post_id,
+            f"🏁 <b>ФАСТ-КОММЕНТ стартовал!</b>\n\n"
+            f"Напишите первым комментарий в этой теме "
+            f"и получите <b>{fmt_num(amount)} {cur}</b>.\n\n"
+            f"Пишите прямо сюда 👇",
+            message_thread_id=thread_id,
         )
         logging.info(
-            "FC start: chat=%s requested_thread=%s actual_thread=%s mid=%s",
-            group_id, post_id,
-            getattr(start_msg, "message_thread_id", None),
-            start_msg.message_id,
+            "FC start: chat=%s topic=%s amount=%s mid=%s",
+            group_id, thread_id, amount, post_id,
         )
     except Exception:
         try:
@@ -520,10 +548,7 @@ async def _fc_post(path, amount):
         "channel_id": path,
         "group_id": group_id,
         "post_id": post_id,
-        "thread_id": (
-            getattr(start_msg, "message_thread_id", None) or post_id
-        ),
-        "start_msg_id": (start_msg.message_id if start_msg else None),
+        "thread_id": thread_id,
         "amount": amount,
         "started": time.time(),
     }
@@ -2715,10 +2740,9 @@ async def fc_waiter(message: Message):
         return
     if getattr(message, "message_thread_id", None) is not None and fc is not None:
         logging.info(
-            "FC dbg: chat=%s thread=%s expecting_thread=%s/%s active_fc=%s/%s",
+            "FC dbg: chat=%s thread=%s match_thread=%s post=%s",
             message.chat.id, message.message_thread_id,
             fc.get("thread_id"), fc.get("post_id"),
-            fc.get("group_id"), fc.get("post_id"),
         )
     if fc["group_id"] != message.chat.id:
         return
