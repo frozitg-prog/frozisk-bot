@@ -2049,7 +2049,17 @@ async def cq_roulette(cb: CallbackQuery, state: FSMContext):
         f"Ставка: от {fmt_num(min_bet)} {cur}\n"
         f"Шанс победы: {chance}%\n"
         f"Выигрыш: ставка ×{fmt_num(mult)}\n\n"
-        f"Введите сумму ставки:"
+        f"Введите сумму ставки:",
+        reply_markup=roulette_bet_kb(),
+    )
+
+
+def roulette_bet_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Поставить всё", callback_data="roulette_all")],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
     )
 
 
@@ -2074,6 +2084,28 @@ async def roulette_bet(message: Message, state: FSMContext):
     last_bet[message.from_user.id] = amount
     text = play_roulette(message.from_user.id, amount)
     await message.answer(text, reply_markup=roulette_result_kb())
+
+
+@router.callback_query(F.data == "roulette_all")
+async def roulette_all(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    user = db.get_user(cb.from_user.id)
+    if not user:
+        await cb.message.answer("Сначала откройте меню командой /start.")
+        await state.clear()
+        return
+    balance = user["balance"]
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    if balance < min_bet:
+        await cb.message.answer(
+            f"Баланса не хватает даже на минимальную ставку "
+            f"({fmt_num(min_bet)} {db.get_setting('currency', config.CURRENCY)})."
+        )
+        return
+    await state.clear()
+    last_bet[cb.from_user.id] = balance
+    text = play_roulette(cb.from_user.id, balance)
+    await cb.message.answer(text, reply_markup=roulette_result_kb())
 
 
 def roulette_result_kb():
