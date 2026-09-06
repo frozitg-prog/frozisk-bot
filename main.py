@@ -1955,6 +1955,24 @@ async def cmd_userbal(message: Message, command: CommandObject):
     )
 
 
+@router.message(Command("stickerid"))
+async def cmd_stickerid(message: Message):
+    await message.answer(
+        "Отправьте стикер, и я верну его file_id. "
+        "Если вы админ — стикер также сохранится как анимация казино-слота."
+    )
+
+
+@router.message(F.sticker)
+async def on_sticker(message: Message):
+    sid = message.sticker.file_id
+    reply = f"🎴 file_id стикера:\n<code>{sid}</code>"
+    if is_admin(message.from_user.id):
+        db.set_setting("slots_sticker", sid)
+        reply += "\n\n✅ Сохранён как стикер казино-слота!"
+    await message.answer(reply, parse_mode=ParseMode.HTML)
+
+
 @router.message(Command("withdrawals"))
 async def cmd_withdrawals(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
@@ -2507,12 +2525,14 @@ async def run_slots(uid, amount, state, msg):
     mult = slots_combo_mult(combo)
 
     sticker_id = db.get_setting("slots_sticker", "")
-    await msg.answer("🎰 Крутим барабан...")
     if sticker_id:
+        await msg.answer("🎰 Крутим барабан...")
         try:
             await bot.send_sticker(uid, sticker_id)
         except Exception:
-            pass
+            await msg.answer("🎲🎰🍒 Крутим барабан...")
+    else:
+        await msg.answer("🎲🎰🍒 Крутим барабан...")
 
     if mult <= 0 or combo not in ("seven", "lemon", "bar", "cherry"):
         await msg.answer(
