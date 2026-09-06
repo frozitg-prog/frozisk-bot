@@ -474,11 +474,13 @@ async def _fc_post(path, amount):
         f"⏳ Кто успеет первым — того и награда!",
     )
     post_id = announced.message_id
-    try:
-        chat = await bot.get_chat(path)
-        group_id = chat.linked_chat_id
-    except Exception:
-        group_id = None
+    group_id = db.get_setting("fc_group_id")
+    if not group_id:
+        try:
+            chat = await bot.get_chat(path)
+            group_id = chat.linked_chat_id
+        except Exception:
+            group_id = None
     if not group_id:
         try:
             await bot.edit_message_text(
@@ -617,6 +619,22 @@ async def cmd_fc_set(message: Message, command: CommandObject):
         return
     db.set_setting("fc_channel_id", channel)
     await message.answer("Канал для фаст-комментов сохранён.")
+
+
+@router.message(Command("fc_chat"))
+async def cmd_fc_chat(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    args = command.args.split() if command.args else []
+    if len(args) < 1 or not args[0].lstrip("-").isdigit():
+        await message.answer(
+            "Использование: /fc_chat <номер чата комментариев>\n"
+            "Например: /fc_chat -1004463161383"
+        )
+        return
+    group_id = int(args[0])
+    db.set_setting("fc_group_id", group_id)
+    await message.answer("Чат комментариев для фаст-комментов сохранён.")
 
 
 @router.message(Command("fc_cancel"))
