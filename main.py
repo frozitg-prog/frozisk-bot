@@ -470,7 +470,7 @@ async def _fc_post(path, amount):
     announced = await bot.send_message(
         path,
         f"🤑 ФАСТ-КОММЕНТ\n\n"
-        f"Напишите первым комментарий под этим постом "
+        f"Напишите первым комментарий в комментариях "
         f"и получите <b>{fmt_num(amount)} {cur}</b>\n\n"
         f"⏳ Кто успеет первым — того и награда!",
     )
@@ -495,8 +495,8 @@ async def _fc_post(path, amount):
         await bot.send_message(
             group_id,
             f"🏁 <b>ФАСТ-КОММЕНТ стартовал!</b>\n\n"
-            f"Напишите первым комментарий под постом в канале "
-            f"и получите <b>{fmt_num(amount)} {cur}</b>.",
+            f"Напишите первым комментарий здесь и получите "
+            f"<b>{fmt_num(amount)} {cur}</b>.",
         )
     except Exception:
         try:
@@ -602,7 +602,7 @@ async def cmd_fc(message: Message, command: CommandObject):
         )
         await message.answer(
             f"🚀 Фаст-коммент запущен ({src})! "
-            f"Первый комментарий под постом получит {fmt_num(amount)} {cur}."
+            f"Первый комментарий в чате получит {fmt_num(amount)} {cur}."
         )
     else:
         await message.answer(f"⚠️ {err}")
@@ -2765,16 +2765,7 @@ async def fc_waiter(message: Message):
         return
     if message.chat.type not in ("group", "supergroup"):
         return
-    logging.info(
-        "FC dbg: chat=%s thread=%s match_thread=%s post=%s",
-        message.chat.id, message.message_thread_id,
-        fc.get("thread_id"), fc.get("post_id"),
-    )
     if fc["group_id"] != message.chat.id:
-        return
-    if getattr(message, "message_thread_id", None) is None:
-        return
-    if message.message_thread_id not in (fc["post_id"], fc.get("thread_id")):
         return
     if not message.from_user or message.from_user.is_bot:
         return
@@ -2787,10 +2778,9 @@ async def fc_waiter(message: Message):
     await _fc_cancel_task(fc.get("task"))
 
     winner = message.from_user
-    win_thread = getattr(message, "message_thread_id", None) or fc["thread_id"] or fc["post_id"]
     logging.info(
-        "FC win: user=%s chat=%s post=%s thread=%s amount=%s",
-        winner.id, message.chat.id, fc["post_id"], win_thread, fc["amount"],
+        "FC win: user=%s chat=%s post=%s amount=%s",
+        winner.id, message.chat.id, fc["post_id"], fc["amount"],
     )
     db.add_user(
         winner.id,
@@ -2805,7 +2795,6 @@ async def fc_waiter(message: Message):
             await bot.send_message(
                 fc["group_id"],
                 "⚠️ Не удалось начислить голду — напишите админу.",
-                message_thread_id=fc["post_id"],
             )
         except Exception:
             pass
@@ -2818,19 +2807,9 @@ async def fc_waiter(message: Message):
             fc["group_id"],
             f"🥇 {nick} написал первым и забирает "
             f"<b>{fmt_num(fc['amount'])} {cur}</b>!\n\n📣 Победитель — {nick}!",
-            message_thread_id=win_thread,
         )
     except Exception:
-        # падаем на обычный чат без топиков -> шлём в post-тред
-        try:
-            await bot.send_message(
-                fc["group_id"],
-                f"🥇 {nick} написал первым и забирает "
-                f"<b>{fmt_num(fc['amount'])} {cur}</b>!\n\n📣 Победитель — {nick}!",
-                message_thread_id=fc["post_id"],
-            )
-        except Exception:
-            pass
+        pass
     try:
         await bot.send_message(
             fc["channel_id"],
@@ -2843,7 +2822,7 @@ async def fc_waiter(message: Message):
         await bot.send_message(
             winner.id,
             f"🏆 <b>Поздравляем, вы выиграли фаст-коммент!</b>\n\n"
-            f"Вы написали первым под постом и получаете "
+            f"Вы написали первым и получаете "
             f"<b>+{fmt_num(fc['amount'])} {cur}</b>.\n"
             f"Начислено на ваш баланс. Удачного дня! ✨",
         )
