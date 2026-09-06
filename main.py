@@ -476,10 +476,6 @@ async def _fc_post(path, amount):
     )
     post_id = announced.message_id
     group_id = db.get_setting("fc_group_id")
-    logging.info(
-        "FC group resolve: fc_group_id=%r path=%s post_id=%s",
-        group_id, path, post_id,
-    )
     if not group_id:
         try:
             chat = await bot.get_chat(path)
@@ -495,53 +491,12 @@ async def _fc_post(path, amount):
             pass
         return _FC_LINK_ERROR
 
-    thread_id = None
-
-    def _topic_supported(chat_type):
-        return chat_type in ("supergroup", "group")
-
-    try:
-        # тип проверяем у самого чата комментариев (группа), не у канала
-        linked = await bot.get_chat(group_id)
-        if _topic_supported(linked.type):
-            from aiogram.methods import CreateForumTopic
-
-            res = await bot(CreateForumTopic(
-                chat_id=group_id,
-                name=f"🏁 Фаст-коммент {fmt_num(amount)} {cur}",
-            ))
-            thread_id = res.message_thread_id
-    except Exception:
-        logging.exception("FC create_forum_topic failed")
-
-    if thread_id is None:
-        try:
-            await bot.edit_message_text(
-                path,
-                post_id,
-                "⚠️ Бот не может создавать топики в чате комментариев. "
-                "Включите топики (темы) в чате комментариев.",
-            )
-        except Exception:
-            pass
-        return (
-            "Бот не может создавать топики в чате комментариев. "
-            "Убедитесь, что бот добавлен админом в чат комментариев "
-            "-1004463161383 и там включены топики."
-        )
-
     try:
         await bot.send_message(
             group_id,
             f"🏁 <b>ФАСТ-КОММЕНТ стартовал!</b>\n\n"
-            f"Напишите первым комментарий в этой теме "
-            f"и получите <b>{fmt_num(amount)} {cur}</b>.\n\n"
-            f"Пишите прямо сюда 👇",
-            message_thread_id=thread_id,
-        )
-        logging.info(
-            "FC start: chat=%s topic=%s amount=%s mid=%s",
-            group_id, thread_id, amount, post_id,
+            f"Напишите первым комментарий под постом в канале "
+            f"и получите <b>{fmt_num(amount)} {cur}</b>.",
         )
     except Exception:
         try:
@@ -558,11 +513,16 @@ async def _fc_post(path, amount):
             "Добавьте бота админом в чат комментариев."
         )
 
+    logging.info(
+        "FC start: chat=%s post=%s amount=%s",
+        group_id, post_id, amount,
+    )
+
     _active_fc = {
         "channel_id": path,
         "group_id": group_id,
         "post_id": post_id,
-        "thread_id": thread_id,
+        "thread_id": post_id,
         "amount": amount,
         "started": time.time(),
     }
@@ -2805,12 +2765,11 @@ async def fc_waiter(message: Message):
         return
     if message.chat.type not in ("group", "supergroup"):
         return
-    if getattr(message, "message_thread_id", None) is not None and fc is not None:
-        logging.info(
-            "FC dbg: chat=%s thread=%s match_thread=%s post=%s",
-            message.chat.id, message.message_thread_id,
-            fc.get("thread_id"), fc.get("post_id"),
-        )
+    logging.info(
+        "FC dbg: chat=%s thread=%s match_thread=%s post=%s",
+        message.chat.id, message.message_thread_id,
+        fc.get("thread_id"), fc.get("post_id"),
+    )
     if fc["group_id"] != message.chat.id:
         return
     if getattr(message, "message_thread_id", None) is None:
