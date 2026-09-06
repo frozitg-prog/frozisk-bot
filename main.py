@@ -213,6 +213,10 @@ def _word_amount(d, forms):
     return f"{s} {word}"
 
 
+def _withdraw_enabled():
+    return db.get_setting("withdraw_enabled", "1") not in (0, "0", "false", "off", "no")
+
+
 def admin_main_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -628,6 +632,12 @@ async def cq_adm_wd(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     await cb.answer()
+    enabled = _withdraw_enabled()
+    toggle_text = (
+        "🔒 Выводы включены — ВЫКЛЮЧИТЬ"
+        if enabled
+        else "🔓 Выводы отключены — ВКЛЮЧИТЬ"
+    )
     await cb.message.edit_text(
         "💸 Выводы:",
         reply_markup=admin_sub_kb(
@@ -636,10 +646,20 @@ async def cq_adm_wd(cb: CallbackQuery):
                     InlineKeyboardButton(text="📋 Все", callback_data="adm_wd_all"),
                     InlineKeyboardButton(text="⏳ Ожидают", callback_data="adm_wd_pending"),
                 ],
+                [InlineKeyboardButton(text=toggle_text, callback_data="adm_wd_toggle")],
             ],
             "adm_main",
         ),
     )
+
+
+@router.callback_query(F.data == "adm_wd_toggle")
+async def cq_adm_wd_toggle(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    current = _withdraw_enabled()
+    db.set_setting("withdraw_enabled", "0" if current else "1")
+    await cq_adm_wd(cb)
 
 
 @router.callback_query(F.data.startswith("adm_wd_"))
@@ -2222,6 +2242,11 @@ async def cq_balance(cb: CallbackQuery):
 @router.callback_query(F.data == "start_withdraw")
 async def cq_start_withdraw(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
+    if not _withdraw_enabled():
+        await cb.message.answer(
+            "🔒 Выводы временно приостановлены. Попробуйте позже."
+        )
+        return
     min_wd = db.get_setting("min_withdraw", config.DEFAULT_MIN_WITHDRAW)
     cur = db.get_setting("currency", config.CURRENCY)
     skin = db.get_setting("withdraw_skin", config.DEFAULT_SKIN)
@@ -2237,6 +2262,10 @@ async def cq_start_withdraw(cb: CallbackQuery, state: FSMContext):
 
 @router.message(Withdraw.price, F.text)
 async def wd_price(message: Message, state: FSMContext):
+    if not _withdraw_enabled():
+        await state.clear()
+        await message.answer("🔒 Выводы временно приостановлены. Попробуйте позже.")
+        return
     try:
         amount = float(message.text.replace(",", "."))
     except ValueError:
@@ -2258,6 +2287,10 @@ async def wd_price(message: Message, state: FSMContext):
 
 @router.message(Withdraw.screenshot, F.photo)
 async def wd_screenshot(message: Message, state: FSMContext):
+    if not _withdraw_enabled():
+        await state.clear()
+        await message.answer("🔒 Выводы временно приостановлены. Попробуйте позже.")
+        return
     data = await state.update_data(screenshot=message.photo[-1].file_id)
     await state.clear()
 
@@ -2625,6 +2658,12 @@ async def fc_waiter(message: Message):
         return
     if message.chat.type not in ("group", "supergroup"):
         return
+    if getattr(message, "message_thread_id", None) is not None:
+        logging.info(
+            "FC dbg: chat=%s type=%s thread=%s active_fc=%s/%s",
+            message.chat.id, message.chat.type, message.message_thread_id,
+            fc.get("group_id"), fc.get("post_id"),
+        )
     if fc["group_id"] != message.chat.id:
         return
     if getattr(message, "message_thread_id", None) != fc["post_id"]:
@@ -2640,6 +2679,16 @@ async def fc_waiter(message: Message):
     await _fc_cancel_task(fc.get("task"))
 
     winner = message.from_user
+    logging.info(
+        "FC win: user=%s chat=%s post=%s amount=%s",
+        winner.id, message.chat.id, fc["post_id"], fc["amount"],
+    )
+    db.add_user(
+        winner.id,
+        winner.username,
+        winner.first_name or "",
+        None,
+    )
     try:
         db.add_balance(winner.id, fc["amount"])
     except Exception:
