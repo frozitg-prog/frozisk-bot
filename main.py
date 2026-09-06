@@ -2767,6 +2767,8 @@ async def fc_waiter(message: Message):
         return
     if fc["group_id"] != message.chat.id:
         return
+    if not (message.text or message.caption):
+        return
     if not message.from_user or message.from_user.is_bot:
         return
     if is_admin(message.from_user.id):
@@ -2803,7 +2805,7 @@ async def fc_waiter(message: Message):
     cur = db.get_setting("currency", config.CURRENCY)
     if winner.username:
         nick = f"@{winner.username}"
-    elif winner.first_name:
+    elif winner.first_name and winner.first_name != "Telegram":
         nick = winner.first_name
     else:
         nick = f"id{winner.id}"
