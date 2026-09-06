@@ -683,6 +683,28 @@ async def cmd_set_skin(message: Message, command: CommandObject):
     await message.answer(f"Скин установлен: {command.args.strip()}")
 
 
+@router.message(Command("packinfo"))
+async def cmd_packinfo(message: Message, command: CommandObject):
+    if not is_admin(message.from_user.id):
+        return
+    name = (command.args or "").strip()
+    if not name:
+        await message.answer("Использование: /packinfo <имя пака>\nНапример: /packinfo TgAndroidIcons")
+        return
+    try:
+        st = await bot.get_sticker_set(name)
+    except Exception as e:
+        await message.answer(f"Не удалось получить пак: {e}")
+        return
+    lines = [f"Пак: {st.name}  ·  {st.title}", f"Стикеров: {len(st.stickers)}", ""]
+    for i, s in enumerate(st.stickers, 1):
+        ceid = getattr(s, "custom_emoji_id", None) or "—"
+        lines.append(f"{i}. {s.emoji} → {ceid}")
+    text = "\n".join(lines)
+    for chunk in [text[i:i + 3800] for i in range(0, len(text), 3800)]:
+        await message.answer(chunk)
+
+
 @router.message(Command("admin", "a"))
 async def cmd_admin(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
