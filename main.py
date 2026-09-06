@@ -243,6 +243,27 @@ def admin_sub_kb(buttons, back="adm_main"):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+def _admin_add_notify(user_id, amount):
+    cur = db.get_setting("currency", config.CURRENCY)
+    try:
+        return (
+            f"💎 Администрация перевела вам "
+            f"<b>+{fmt_num(amount)} {cur}</b>!\n"
+            f"Ваш баланс: <b>{fmt_num(db.get_user(user_id)['balance'])} {cur}</b>."
+        )
+    except Exception:
+        return None
+
+
+async def _send_admin_add(user_id, amount):
+    text = _admin_add_notify(user_id, amount)
+    if text:
+        try:
+            await bot.send_message(user_id, text)
+        except Exception:
+            pass
+
+
 def withdrawal_actions_kb(wd_id):
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -1653,6 +1674,7 @@ async def admin_balance_amount(message: Message, state: FSMContext):
     amount = int(float(text))
     user = db.get_user(target)
     db.add_balance(target, amount)
+    await _send_admin_add(target, amount)
     cur = db.get_setting("currency", config.CURRENCY)
     await state.clear()
     await message.answer(
@@ -1740,6 +1762,7 @@ async def cmd_addbal(message: Message, command: CommandObject):
         return
     db.add_balance(user["id"], int(args[1]))
     cur = db.get_setting("currency", config.CURRENCY)
+    await _send_admin_add(user["id"], int(args[1]))
     await message.answer(
         f"Начислено +{fmt_num(args[1])} {cur} пользователю {user['first_name']}"
         f" (@{user['username'] or user['id']})."
@@ -2745,8 +2768,10 @@ async def fc_waiter(message: Message):
     try:
         await bot.send_message(
             winner.id,
-            f"🎉 Вы написали первым под постом фаст-коммента!\n"
-            f"Начислено: +{fmt_num(fc['amount'])} {cur}",
+            f"🏆 <b>Поздравляем, вы выиграли фаст-коммент!</b>\n\n"
+            f"Вы написали первым под постом и получаете "
+            f"<b>+{fmt_num(fc['amount'])} {cur}</b>.\n"
+            f"Начислено на ваш баланс. Удачного дня! ✨",
         )
     except Exception:
         pass
