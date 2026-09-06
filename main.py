@@ -2801,7 +2801,12 @@ async def fc_waiter(message: Message):
         return
 
     cur = db.get_setting("currency", config.CURRENCY)
-    nick = f"@{winner.username}" if winner.username else winner.first_name
+    if winner.username:
+        nick = f"@{winner.username}"
+    elif winner.first_name:
+        nick = winner.first_name
+    else:
+        nick = f"id{winner.id}"
     try:
         await bot.send_message(
             fc["group_id"],
