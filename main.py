@@ -21,7 +21,8 @@ from aiogram.types import (
     CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    Message)
+    Message,
+    MessageEntity)
 
 import config
 import database as db
@@ -1975,6 +1976,20 @@ async def on_sticker(message: Message):
     await message.answer(reply, parse_mode=ParseMode.HTML)
 
 
+@router.message(F.custom_emoji_id)
+async def on_custom_emoji(message: Message):
+    if message.chat.type != "private":
+        return
+    cid = message.custom_emoji_id
+    text = message.text or ""
+    reply = f"✨ Это премиум-эмодзи (custom_emoji_id):\n<code>{cid}</code>\nСимвол: {text}"
+    if is_admin(message.from_user.id):
+        db.set_setting("slots_custom_emoji", cid)
+        db.set_setting("slots_sticker", "")
+        reply += "\n\n✅ Сохранён как анимация казино-слота (премиум-эмодзи)!"
+    await message.answer(reply, parse_mode=ParseMode.HTML)
+
+
 @router.message(Command("withdrawals"))
 async def cmd_withdrawals(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
@@ -2527,14 +2542,26 @@ async def run_slots(uid, amount, state, msg):
     mult = slots_combo_mult(combo)
 
     sticker_id = db.get_setting("slots_sticker", "")
+    custom_emoji_id = db.get_setting("slots_custom_emoji", "")
+    animation_sent = False
     if sticker_id:
-        await msg.answer("🎰 Крутим барабан...")
         try:
             await bot.send_sticker(uid, sticker_id)
+            animation_sent = True
         except Exception:
-            await msg.answer("🎲🎰🍒 Крутим барабан...")
-    else:
-        await msg.answer("🎲🎰🍒 Крутим барабан...")
+            pass
+    elif custom_emoji_id:
+        try:
+            await bot.send_message(
+                uid,
+                "🎲",
+                entities=[MessageEntity(type="custom_emoji", offset=0, length=1, custom_emoji_id=custom_emoji_id)],
+            )
+            animation_sent = True
+        except Exception:
+            pass
+    if not animation_sent:
+        await msg.answer("🎰")
 
     if mult <= 0 or combo not in ("seven", "lemon", "bar", "cherry"):
         await msg.answer(
