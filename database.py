@@ -289,10 +289,17 @@ def add_balance(user_id, amount):
 def spend_balance(user_id, amount):
     conn = connect()
     with conn:
-        cur = conn.execute(
-            f"UPDATE users SET balance = balance - {_PH} WHERE id = {_PH} AND balance >= {_PH}",
-            (amount, user_id, amount),
-        )
+        if USE_PG:
+            cur = conn.execute(
+                f"UPDATE users SET balance = GREATEST(balance - {_PH}, 0) "
+                f"WHERE id = {_PH} AND balance >= {_PH} - 0.0001",
+                (amount, user_id, amount),
+            )
+        else:
+            cur = conn.execute(
+                f"UPDATE users SET balance = balance - {_PH} WHERE id = {_PH} AND balance >= {_PH}",
+                (amount, user_id, amount),
+            )
     conn.close()
     return cur.rowcount > 0
 
