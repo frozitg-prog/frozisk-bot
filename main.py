@@ -2771,6 +2771,8 @@ async def fc_waiter(message: Message):
         return
     if not message.from_user or message.from_user.is_bot:
         return
+    if message.from_user.id in (777000, 666000):
+        return
     if is_admin(message.from_user.id):
         return
 
