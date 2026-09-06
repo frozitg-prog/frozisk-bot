@@ -467,6 +467,27 @@ async def _fc_post(path, amount):
             pass
         return False
 
+    try:
+        await bot.send_message(
+            group_id,
+            f"🏁 ФАСТ-КОММЕНТ стартовал!\n"
+            f"Первый комментарий в этой ветке забирает "
+            f"<b>{fmt_num(amount)} {cur}</b>.\n\n"
+            f"Ответьте на это сообщение — и вперёд 👇",
+            message_thread_id=post_id,
+        )
+    except Exception:
+        try:
+            await bot.edit_message_text(
+                path,
+                post_id,
+                "⚠️ Бот не может писать в чат комментариев этого канала. "
+                "Добавьте бота админом в чат комментариев.",
+            )
+        except Exception:
+            pass
+        return False
+
     _active_fc = {
         "channel_id": path,
         "group_id": group_id,
