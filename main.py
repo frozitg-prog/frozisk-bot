@@ -476,6 +476,10 @@ async def _fc_post(path, amount):
     )
     post_id = announced.message_id
     group_id = db.get_setting("fc_group_id")
+    logging.info(
+        "FC group resolve: fc_group_id=%r path=%s post_id=%s",
+        group_id, path, post_id,
+    )
     if not group_id:
         try:
             chat = await bot.get_chat(path)
@@ -489,7 +493,7 @@ async def _fc_post(path, amount):
             )
         except Exception:
             pass
-        return False
+        return _FC_LINK_ERROR
 
     thread_id = None
 
@@ -520,7 +524,11 @@ async def _fc_post(path, amount):
             )
         except Exception:
             pass
-        return False
+        return (
+            "Бот не может создавать топики в чате комментариев. "
+            "Убедитесь, что бот добавлен админом в чат комментариев "
+            "-1004463161383 и там включены топики."
+        )
 
     try:
         await bot.send_message(
@@ -545,7 +553,10 @@ async def _fc_post(path, amount):
             )
         except Exception:
             pass
-        return False
+        return (
+            "Бот не может писать в чат комментариев этого канала. "
+            "Добавьте бота админом в чат комментариев."
+        )
 
     _active_fc = {
         "channel_id": path,
@@ -572,7 +583,7 @@ async def _fc_post(path, amount):
                 pass
 
     _active_fc["task"] = asyncio.create_task(_expire())
-    return True
+    return ""
 
 
 @router.message(Command("fc"))
@@ -600,12 +611,6 @@ async def cmd_fc(message: Message, command: CommandObject):
                 f"На балансе пользователя {payer['first_name']} недостаточно голды."
             )
             return
-        db.add_balance(payer["id"], -amount)
-        cur = db.get_setting("currency", config.CURRENCY)
-        await message.answer(
-            f"💸 Снято {fmt_num(amount)} {cur} с баланса {payer['first_name']} "
-            f"(@{payer['username'] or payer['id']})."
-        )
 
     if message.chat.type == "channel":
         channel = message.chat.id
@@ -620,7 +625,16 @@ async def cmd_fc(message: Message, command: CommandObject):
             return
         channel = int(channel)
 
-    if await _fc_post(channel, amount):
+    err = await _fc_post(channel, amount)
+    if not err and payer:
+        db.add_balance(payer["id"], -amount)
+        cur = db.get_setting("currency", config.CURRENCY)
+        await message.answer(
+            f"💸 Снято {fmt_num(amount)} {cur} с баланса {payer['first_name']} "
+            f"(@{payer['username'] or payer['id']})."
+        )
+
+    if not err:
         cur = db.get_setting("currency", config.CURRENCY)
         src = (
             f"за счёт {payer['first_name']}"
@@ -631,7 +645,7 @@ async def cmd_fc(message: Message, command: CommandObject):
             f"Первый комментарий под постом получит {fmt_num(amount)} {cur}."
         )
     else:
-        await message.answer(_FC_LINK_ERROR)
+        await message.answer(f"⚠️ {err}")
 
 
 @router.message(Command("fc_set"))
