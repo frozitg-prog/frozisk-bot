@@ -12,6 +12,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -2156,7 +2157,14 @@ async def cq_roulette_change(cb: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "back_to_menu")
 async def cq_back_to_menu(cb: CallbackQuery):
     await cb.answer()
-    await cb.message.edit_text("Главное меню:", reply_markup=main_menu())
+    try:
+        await cb.message.edit_text("Главное меню:", reply_markup=main_menu())
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            return
+        raise
+    except Exception:
+        pass
 
 
 def top_kb():
