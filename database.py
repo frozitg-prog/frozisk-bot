@@ -290,10 +290,12 @@ def spend_balance(user_id, amount):
     conn = connect()
     with conn:
         if USE_PG:
+            # Списываем ставку; если баланс не дотягивает до amount - берём весь остаток.
+            # GREATEST/LEAST защищают от ложного "недостаточно" при float-округлении больших сумм.
             cur = conn.execute(
                 f"UPDATE users SET balance = GREATEST(balance - {_PH}, 0) "
-                f"WHERE id = {_PH} AND balance >= {_PH} - 0.0001",
-                (amount, user_id, amount),
+                f"WHERE id = {_PH} AND balance > 0",
+                (amount, user_id),
             )
         else:
             cur = conn.execute(
