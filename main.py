@@ -138,6 +138,10 @@ class Mines(StatesGroup):
     grid = State()
 
 
+class Slots(StatesGroup):
+    bet = State()
+
+
 def main_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -247,6 +251,7 @@ def admin_main_kb():
                 InlineKeyboardButton(text="📢 Задания", callback_data="adm_tasks"),
             ],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings")],
+            [InlineKeyboardButton(text="🎴 Казино-слот", callback_data="adm_casino")],
         ]
     )
 
@@ -1280,6 +1285,42 @@ async def cq_adm_settings(cb: CallbackQuery):
             "adm_main"))
 
 
+@router.callback_query(F.data == "adm_casino")
+async def cq_adm_casino(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await cb.answer()
+    kb = admin_sub_kb(
+        [
+            [InlineKeyboardButton(text=f"🎰 Каша: {db.get_setting('slots_prob_mush', 40)}%", callback_data="adm_casino_set:prob_mush")],
+            [InlineKeyboardButton(text=f"7️⃣ Три семёрки: {db.get_setting('slots_prob_7', 2)}% (×{db.get_setting('slots_mult_7', '5')})", callback_data="adm_casino_set:prob_7")],
+            [InlineKeyboardButton(text=f"🍋 Три лимона: {db.get_setting('slots_prob_lemon', 8)}% (×{db.get_setting('slots_mult_lemon', '2')})", callback_data="adm_casino_set:prob_lemon")],
+            [InlineKeyboardButton(text=f"🎰 Три бара: {db.get_setting('slots_prob_bar', 15)}% (×{db.get_setting('slots_mult_bar', '1.5')})", callback_data="adm_casino_set:prob_bar")],
+            [InlineKeyboardButton(text=f"🍒 Три вишни: {db.get_setting('slots_prob_cherry', 35)}% (×{db.get_setting('slots_mult_cherry', '1')})", callback_data="adm_casino_set:prob_cherry")],
+            [InlineKeyboardButton(text=f"🎬 Множитель 7️⃣: ×{db.get_setting('slots_mult_7', '5')}", callback_data="adm_casino_set:mult_7")],
+            [InlineKeyboardButton(text=f"🎬 Множитель 🍋: ×{db.get_setting('slots_mult_lemon', '2')}", callback_data="adm_casino_set:mult_lemon")],
+            [InlineKeyboardButton(text=f"🎬 Множитель бара: ×{db.get_setting('slots_mult_bar', '1.5')}", callback_data="adm_casino_set:mult_bar")],
+            [InlineKeyboardButton(text=f"🎬 Множитель вишни: ×{db.get_setting('slots_mult_cherry', '1')}", callback_data="adm_casino_set:mult_cherry")],
+            [InlineKeyboardButton(text="🖼 Стикер (file_id)", callback_data="adm_casino_set:sticker")],
+        ],
+        "adm_main")
+    await cb.message.edit_text("🎴 Настройки казино-слота:", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("adm_casino_set:"))
+async def cq_adm_casino_set(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    param = cb.data.split(":", 1)[1]
+    if param not in ("prob_mush", "prob_7", "prob_lemon", "prob_bar", "prob_cherry",
+                     "mult_7", "mult_lemon", "mult_bar", "mult_cherry", "sticker"):
+        return
+    await state.set_state(AdminPanel.amount)
+    await state.update_data(casino_param=param)
+    await cb.answer()
+    await cb.message.edit_text("Введите новое значение:")
+
+
 @router.callback_query(F.data.startswith("adm_set_"))
 async def cq_adm_set(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
@@ -1489,10 +1530,28 @@ async def adm_panel_amount(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     action = data.get("ap_action")
+    casino_param = data.get("casino_param")
     cur = db.get_setting("currency", config.CURRENCY)
 
     def parse_num(t):
         return float(t.replace(",", ".").strip())
+
+    if casino_param:
+        val = message.text.strip()
+        if casino_param == "sticker":
+            db.set_setting("slots_sticker", val)
+            await state.clear()
+            await message.answer(f"🖼 Стикер казино обновлён.")
+            return
+        try:
+            num = float(val.replace(",", "."))
+        except ValueError:
+            await message.answer("Введите число.")
+            return
+        db.set_setting(casino_param, num)
+        await state.clear()
+        await message.answer(f"✅ Параметр «{casino_param}» установлен: {val}.")
+        return
 
     if action == "task_del":
         num = message.text.strip()
@@ -2093,6 +2152,9 @@ async def cq_roulette(cb: CallbackQuery, state: FSMContext):
                 InlineKeyboardButton(text="🎰 Классическая", callback_data="casino_classic"),
                 InlineKeyboardButton(text="💣 Сапёр", callback_data="casino_mines"),
             ],
+            [
+                InlineKeyboardButton(text="🎴 Казино-слот", callback_data="casino_slots"),
+            ],
             [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
         ]
     )
@@ -2339,6 +2401,201 @@ async def cq_casino_classic(cb: CallbackQuery, state: FSMContext):
         f"Выигрыш: ставка ×{fmt_num(mult)}\n\n"
         f"Введите сумму ставки:",
         reply_markup=roulette_bet_kb())
+
+
+@router.callback_query(F.data == "casino_slots")
+async def cq_casino_slots(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.set_state(Slots.bet)
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    slots_text = slots_rules_text()
+    await cb.message.answer(
+        f"🎴 Казино-слот\n"
+        f"Ставка: от {fmt_num(min_bet)} {cur}\n"
+        f"{slots_text}\n"
+        f"Введите сумму ставки:",
+        reply_markup=slots_bet_kb())
+
+
+def slots_rules_text():
+    cur = db.get_setting("currency", config.CURRENCY)
+    mult_7 = db.get_setting("mult_7", "5")
+    mult_lem = db.get_setting("mult_lemon", "2")
+    mult_bar = db.get_setting("mult_bar", "1.5")
+    mult_cherry = db.get_setting("mult_cherry", "1")
+    l = [
+        "🎴 Тройки:",
+        f"  7️⃣7️⃣7️⃣ ×{mult_7}",
+        f"  🍋🍋🍋 ×{mult_lem}",
+        f"  🎰🎰🎰 ×{mult_bar}",
+        f"  🍒🍒🍒 ×{mult_cherry}",
+        f"Каша (разные) = минус ставка",
+    ]
+    return "\n".join(l)
+
+
+def slots_bet_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Поставить всё", callback_data="slots_all")],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+
+
+def slots_again_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎰 Играть ещё", callback_data="slots_again")],
+            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+        ]
+    )
+
+
+@router.callback_query(F.data == "slots_all")
+async def cq_slots_all(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    user = db.get_user(cb.from_user.id)
+    if not user:
+        await cb.message.answer("Сначала откройте меню командой /start.")
+        await state.clear()
+        return
+    balance = user["balance"]
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    if balance < min_bet:
+        await cb.message.answer(
+            f"Баланса не хватает даже на минимальную ставку "
+            f"({fmt_num(min_bet)} {db.get_setting('currency', config.CURRENCY)})."
+        )
+        return
+    await run_slots(cb.from_user.id, balance, state, cb.message)
+
+
+@router.message(Slots.bet, F.text)
+async def slots_bet(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    if amount < min_bet:
+        await message.answer(f"Минимальная ставка: {fmt_num(min_bet)} {cur}.")
+        return
+    await run_slots(message.from_user.id, amount, state, message)
+
+
+async def run_slots(uid, amount, state, msg):
+    user = db.get_user(uid)
+    if not user:
+        db.add_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+        user = db.get_user(uid)
+    cur = db.get_setting("currency", config.CURRENCY)
+    if user["balance"] < amount:
+        await msg.answer("На балансе недостаточно голды.")
+        await state.clear()
+        return
+    if not db.spend_balance(uid, amount):
+        await msg.answer("На балансе недостаточно голды.")
+        await state.clear()
+        return
+    await state.clear()
+
+    combo = random_slots_result()
+    mult = slots_combo_mult(combo)
+
+    sticker_id = db.get_setting("slots_sticker", "")
+    await msg.answer("🎰 Крутим барабан...")
+    if sticker_id:
+        try:
+            await bot.send_sticker(uid, sticker_id)
+        except Exception:
+            pass
+
+    if mult <= 0 or combo not in ("seven", "lemon", "bar", "cherry"):
+        await msg.answer(
+            f"🍀 Каша! Выпало: {combo_emoji(combo)}\n"
+            f"Ставка {fmt_num(amount)} {cur} потеряна.",
+            reply_markup=slots_again_kb(),
+        )
+        return
+
+    win = round(amount * mult, 2)
+    db.add_balance(uid, win)
+    await msg.answer(
+        f"{combo_emoji(combo)} Выпало: {combo_emoji(combo)}!\n"
+        f"Ставка: {fmt_num(amount)} {cur}\n"
+        f"Множитель: ×{fmt_num(mult)}\n"
+        f"Выигрыш: +{fmt_num(win)} {cur} 💰",
+        reply_markup=slots_again_kb(),
+    )
+
+
+COMMBO_EMOJI = {
+    "seven": "7️⃣",
+    "lemon": "🍋",
+    "bar": "🎰",
+    "cherry": "🍒",
+    "mush": "❓",
+}
+
+
+def combo_emoji(combo):
+    return COMMBO_EMOJI.get(combo, "❓")
+
+
+def random_slots_result():
+    mush_prob = float(db.get_setting("prob_mush", 40))
+    seven_prob = float(db.get_setting("prob_7", 2))
+    lemon_prob = float(db.get_setting("prob_lemon", 8))
+    bar_prob = float(db.get_setting("prob_bar", 15))
+    cherry_prob = float(db.get_setting("prob_cherry", 35))
+    total = mush_prob + seven_prob + lemon_prob + bar_prob + cherry_prob
+    r = random.random() * total
+    acc = 0.0
+    acc += mush_prob
+    if r <= acc:
+        return "mush"
+    acc += seven_prob
+    if r <= acc:
+        return "seven"
+    acc += lemon_prob
+    if r <= acc:
+        return "lemon"
+    acc += bar_prob
+    if r <= acc:
+        return "bar"
+    return "cherry"
+
+
+def slots_combo_mult(combo):
+    if combo == "seven":
+        return float(db.get_setting("mult_7", "5"))
+    if combo == "lemon":
+        return float(db.get_setting("mult_lemon", "2"))
+    if combo == "bar":
+        return float(db.get_setting("mult_bar", "1.5"))
+    if combo == "cherry":
+        return float(db.get_setting("mult_cherry", "1"))
+    return 0
+
+
+@router.callback_query(F.data == "slots_again")
+async def cq_slots_again(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.set_state(Slots.bet)
+    cur = db.get_setting("currency", config.CURRENCY)
+    min_bet = db.get_setting("roulette_min", config.DEFAULT_ROULETTE_MIN)
+    await cb.message.answer(
+        f"🎴 Казино-слот\n"
+        f"Ставка: от {fmt_num(min_bet)} {cur}\n"
+        f"{slots_rules_text()}\n"
+        f"Введите сумму ставки:",
+        reply_markup=slots_bet_kb(),
+    )
+
 
 
 def roulette_bet_kb():
