@@ -1965,6 +1965,8 @@ async def cmd_stickerid(message: Message):
 
 @router.message(F.sticker)
 async def on_sticker(message: Message):
+    if message.chat.type != "private":
+        return
     sid = message.sticker.file_id
     reply = f"🎴 file_id стикера:\n<code>{sid}</code>"
     if is_admin(message.from_user.id):
