@@ -229,25 +229,33 @@ def admin_main_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats"),
-                InlineKeyboardButton(text="💸 Выводы", callback_data="adm_wd"),
+                InlineKeyboardButton(text="Статистика", callback_data="adm_stats",
+                                     icon_custom_emoji_id="5877485980901971030"),
+                InlineKeyboardButton(text="Выводы", callback_data="adm_wd",
+                                     icon_custom_emoji_id="5967390100357648692"),
             ],
             [
-                InlineKeyboardButton(text="👤 Пользователь", callback_data="adm_user"),
-                InlineKeyboardButton(text="💼 Баланс", callback_data="adm_bal"),
+                InlineKeyboardButton(text="Пользователь", callback_data="adm_user",
+                                     icon_custom_emoji_id="5771887475421090729"),
+                InlineKeyboardButton(text="Баланс", callback_data="adm_bal",
+                                     icon_custom_emoji_id="5967389567781703494"),
             ],
             [
-                InlineKeyboardButton(text="🎁 Промокоды", callback_data="adm_codes"),
-                InlineKeyboardButton(text="📢 Задания", callback_data="adm_tasks"),
+                InlineKeyboardButton(text="Промокоды", callback_data="adm_codes",
+                                     icon_custom_emoji_id="6032937473162614352"),
+                InlineKeyboardButton(text="Задания", callback_data="adm_tasks",
+                                     icon_custom_emoji_id="5771695636411847302"),
             ],
-            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings")],
+            [InlineKeyboardButton(text="Настройки", callback_data="adm_settings",
+                                  icon_custom_emoji_id="5877260593903177342")],
         ]
     )
 
 
 def admin_sub_kb(buttons, back="adm_main"):
     kb = list(buttons)
-    kb.append([InlineKeyboardButton(text="↩️ Назад", callback_data=back)])
+    kb.append([InlineKeyboardButton(text="Назад", callback_data=back,
+                                    icon_custom_emoji_id="5875082500023258804")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -276,8 +284,10 @@ def withdrawal_actions_kb(wd_id):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"wd_approve:{wd_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"wd_reject:{wd_id}"),
+                InlineKeyboardButton(text="Выплатить", callback_data=f"wd_approve:{wd_id}",
+                                     icon_custom_emoji_id="5776375003280838798"),
+                InlineKeyboardButton(text="Отклонить", callback_data=f"wd_reject:{wd_id}",
+                                     icon_custom_emoji_id="5778527486270770928"),
             ]
         ]
     )
@@ -770,10 +780,13 @@ async def cq_adm_wd(cb: CallbackQuery):
         reply_markup=admin_sub_kb(
             [
                 [
-                    InlineKeyboardButton(text="📋 Все", callback_data="adm_wd_all"),
-                    InlineKeyboardButton(text="⏳ Ожидают", callback_data="adm_wd_pending"),
+                    InlineKeyboardButton(text="Все", callback_data="adm_wd_all",
+                                          icon_custom_emoji_id="5877316724830768997"),
+                    InlineKeyboardButton(text="Ожидают", callback_data="adm_wd_pending",
+                                          icon_custom_emoji_id="5877613700344450910"),
                 ],
-                [InlineKeyboardButton(text=toggle_text, callback_data="adm_wd_toggle")],
+                [InlineKeyboardButton(text=toggle_text, callback_data="adm_wd_toggle",
+                                          icon_custom_emoji_id="5879896690210639947")],
             ],
             "adm_main",
         ),
@@ -810,7 +823,8 @@ async def cq_adm_wd_list(cb: CallbackQuery):
             f"{uname} · {r['created_at'][:10]}"
         )
         kb.append(
-            [InlineKeyboardButton(text=f"👀 №{r['id']}", callback_data=f"adm_wdshow:{r['id']}")]
+            [InlineKeyboardButton(text=f"№{r['id']}", callback_data=f"adm_wdshow:{r['id']}",
+                                 icon_custom_emoji_id="5874960879434338403")]
         )
     await cb.answer()
     await cb.message.edit_text(
@@ -851,11 +865,15 @@ async def cq_adm_bal(cb: CallbackQuery):
         reply_markup=admin_sub_kb(
             [
                 [
-                    InlineKeyboardButton(text="➕ Начислить", callback_data="adm_bal_add"),
-                    InlineKeyboardButton(text="➖ Списать", callback_data="adm_bal_sub"),
+                    InlineKeyboardButton(text="Начислить", callback_data="adm_bal_add",
+                                     icon_custom_emoji_id="5775937998948404844"),
+                    InlineKeyboardButton(text="Списать", callback_data="adm_bal_sub",
+                                     icon_custom_emoji_id="5778527486270770928"),
                 ],
-                [InlineKeyboardButton(text="🔄 Обнулить", callback_data="adm_bal_zero")],
-                [InlineKeyboardButton(text="🌐 Для всех", callback_data="adm_bal_all")],
+                [InlineKeyboardButton(text="Обнулить", callback_data="adm_bal_zero",
+                                     icon_custom_emoji_id="5879896690210639947")],
+                [InlineKeyboardButton(text="Для всех", callback_data="adm_bal_all",
+                                     icon_custom_emoji_id="5839354140261619193")],
             ],
             "adm_main",
         ),
@@ -872,10 +890,13 @@ async def cq_adm_bal_all(cb: CallbackQuery):
         reply_markup=admin_sub_kb(
             [
                 [
-                    InlineKeyboardButton(text="➕ Всем прибавить", callback_data="adm_bal_all_add"),
-                    InlineKeyboardButton(text="➖ Всем убрать", callback_data="adm_bal_all_sub"),
+                    InlineKeyboardButton(text="Всем прибавить", callback_data="adm_bal_all_add",
+                                     icon_custom_emoji_id="5775937998948404844"),
+                    InlineKeyboardButton(text="Всем убрать", callback_data="adm_bal_all_sub",
+                                     icon_custom_emoji_id="5778527486270770928"),
                 ],
-                [InlineKeyboardButton(text="💥 Обнулить ВСЕМ", callback_data="adm_bal_all_zero")],
+                [InlineKeyboardButton(text="Обнулить ВСЕМ", callback_data="adm_bal_all_zero",
+                                     icon_custom_emoji_id="5879896690210639947")],
             ],
             "adm_bal",
         ),
@@ -920,8 +941,9 @@ async def cq_adm_bal_all_zero(cb: CallbackQuery):
             [
                 [
                     InlineKeyboardButton(
-                        text="✅ Да, обнулить всем",
+                        text="Да, обнулить всем",
                         callback_data="adm_bal_all_zero_go",
+                        icon_custom_emoji_id="5776375003280838798",
                     ),
                 ],
             ],
@@ -963,12 +985,16 @@ async def cq_adm_codes(cb: CallbackQuery):
         reply_markup=admin_sub_kb(
             [
                 [
-                    InlineKeyboardButton(text="📋 Список", callback_data="adm_codes_list"),
-                    InlineKeyboardButton(text="➕ Создать", callback_data="adm_codes_add"),
+                    InlineKeyboardButton(text="Список", callback_data="adm_codes_list",
+                                     icon_custom_emoji_id="5877316724830768997"),
+                    InlineKeyboardButton(text="Создать", callback_data="adm_codes_add",
+                                     icon_custom_emoji_id="5775937998948404844"),
                 ],
                 [
-                    InlineKeyboardButton(text="🎲 Рандомный промокод", callback_data="adm_codes_rand"),
-                    InlineKeyboardButton(text="🗑 Удалить", callback_data="adm_codes_del"),
+                    InlineKeyboardButton(text="Рандомный промокод", callback_data="adm_codes_rand",
+                                     icon_custom_emoji_id="5960608239623082921"),
+                    InlineKeyboardButton(text="Удалить", callback_data="adm_codes_del",
+                                     icon_custom_emoji_id="5879896690210639947"),
                 ],
             ],
             "adm_main",
@@ -1124,7 +1150,8 @@ def promo_result_kb(code):
                     callback_data=f"promo_copy:{code}",
                 )
             ],
-            [InlineKeyboardButton(text="↩️ К промокодам", callback_data="adm_codes")],
+            [InlineKeyboardButton(text="К промокодам", callback_data="adm_codes",
+                                 icon_custom_emoji_id="5875082500023258804")],
         ]
     )
 
@@ -1160,8 +1187,9 @@ async def cq_promo_send(cb: CallbackQuery):
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="📋 Копировать",
+                            text="Копировать",
                             copy_text=CopyTextButton(text=code),
+                            icon_custom_emoji_id="5877316724830768997",
                         )
                     ]
                 ]
@@ -1192,8 +1220,9 @@ async def cq_promo_copy(cb: CallbackQuery):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📋 Копировать",
+                    text="Копировать",
                     copy_text=CopyTextButton(text=code),
+                    icon_custom_emoji_id="5877316724830768997",
                 )
             ]
         ]
@@ -1215,9 +1244,12 @@ async def cq_adm_tasks(cb: CallbackQuery):
         reply_markup=admin_sub_kb(
             [
                 [
-                    InlineKeyboardButton(text="📋 Список", callback_data="adm_tasks_list"),
-                    InlineKeyboardButton(text="➕ Создать", callback_data="adm_tasks_add"),
-                    InlineKeyboardButton(text="➖ Удалить", callback_data="adm_tasks_del"),
+                    InlineKeyboardButton(text="Список", callback_data="adm_tasks_list",
+                                     icon_custom_emoji_id="5877316724830768997"),
+                    InlineKeyboardButton(text="Создать", callback_data="adm_tasks_add",
+                                     icon_custom_emoji_id="5775937998948404844"),
+                    InlineKeyboardButton(text="Удалить", callback_data="adm_tasks_del",
+                                     icon_custom_emoji_id="5879896690210639947"),
                 ],
             ],
             "adm_main",
@@ -1279,32 +1311,44 @@ async def cq_adm_settings(cb: CallbackQuery):
             [
                 [
                     InlineKeyboardButton(
-                        text=f"💵 Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}",
+                        text=f"Мин. вывод: {db.get_setting('min_withdraw', config.DEFAULT_MIN_WITHDRAW)} {cur}",
                         callback_data="adm_set_minwd",
+                        icon_custom_emoji_id="5967390100357648692",
                     ),
                     InlineKeyboardButton(
-                        text=f"🎁 За вступление: {fmt_num(db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN))} {cur}",
+                        text=f"За вступление: {fmt_num(db.get_setting('reward_join', config.DEFAULT_REWARD_JOIN))} {cur}",
                         callback_data="adm_set_join",
+                        icon_custom_emoji_id="6032937473162614352",
                     ),
                 ],
                 [
                     InlineKeyboardButton(
-                        text=f"👥 Бонус за инвайт: {db.get_setting('invite_bonus', 777)} {cur}",
+                        text=f"Бонус за инвайт: {db.get_setting('invite_bonus', 777)} {cur}",
                         callback_data="adm_set_invite",
+                        icon_custom_emoji_id="5942877472163892475",
                     ),
                     InlineKeyboardButton(
-                        text=f"💱 Валюта: {cur}",
+                        text=f"Валюта: {cur}",
                         callback_data="adm_set_currency",
+                        icon_custom_emoji_id="5811989245761426317",
                     ),
                 ],
-                [InlineKeyboardButton(text="🔫 Скин для вывода", callback_data="adm_set_skin")],
-                [InlineKeyboardButton(text=f"🎰 Шанс рулетки: {chance}%", callback_data="adm_set_roulette")],
-                [InlineKeyboardButton(text=f"🎲 Множитель рулетки: x{fmt_num(mult)}", callback_data="adm_set_mult")],
-                [InlineKeyboardButton(text=f"🔥 Стрик 1-й день: {db.get_setting('streak_base', config.DEFAULT_STREAK_BASE)} {cur}", callback_data="adm_set_streak_base")],
-                [InlineKeyboardButton(text=f"🔥 Стрик прирост/день: +{db.get_setting('streak_step', config.DEFAULT_STREAK_STEP)} {cur}", callback_data="adm_set_streak_step")],
-                [InlineKeyboardButton(text=f"🎁 Мин. сумма промо: {fmt_num(db.get_setting('promo_min_amount', config.DEFAULT_PROMO_MIN_AMOUNT))} {cur}", callback_data="adm_set_promo_min")],
-                [InlineKeyboardButton(text=f"🎁 Мин. активаций промо: {db.get_setting('promo_min_uses', config.DEFAULT_PROMO_MIN_USES)}", callback_data="adm_set_promo_uses")],
-                [InlineKeyboardButton(text=f"🎁 КД создания промо: {db.get_setting('promo_cd', config.DEFAULT_PROMO_CD)} сек", callback_data="adm_set_promo_cd")],
+                [InlineKeyboardButton(text=f"Скин для вывода: {db.get_setting('withdraw_skin', config.DEFAULT_SKIN)}", callback_data="adm_set_skin",
+                                           icon_custom_emoji_id="5935968647901089910")],
+                [InlineKeyboardButton(text=f"Шанс рулетки: {chance}%", callback_data="adm_set_roulette",
+                                           icon_custom_emoji_id="5960608239623082921")],
+                [InlineKeyboardButton(text=f"Множитель рулетки: x{fmt_num(mult)}", callback_data="adm_set_mult",
+                                           icon_custom_emoji_id="5960608239623082921")],
+                [InlineKeyboardButton(text=f"Стрик 1-й день: {db.get_setting('streak_base', config.DEFAULT_STREAK_BASE)} {cur}", callback_data="adm_set_streak_base",
+                                           icon_custom_emoji_id="6008118472066732010")],
+                [InlineKeyboardButton(text=f"Стрик прирост/день: +{db.get_setting('streak_step', config.DEFAULT_STREAK_STEP)} {cur}", callback_data="adm_set_streak_step",
+                                           icon_custom_emoji_id="6008118472066732010")],
+                [InlineKeyboardButton(text=f"Мин. сумма промо: {fmt_num(db.get_setting('promo_min_amount', config.DEFAULT_PROMO_MIN_AMOUNT))} {cur}", callback_data="adm_set_promo_min",
+                                           icon_custom_emoji_id="6032937473162614352")],
+                [InlineKeyboardButton(text=f"Мин. активаций промо: {db.get_setting('promo_min_uses', config.DEFAULT_PROMO_MIN_USES)}", callback_data="adm_set_promo_uses",
+                                           icon_custom_emoji_id="6032937473162614352")],
+                [InlineKeyboardButton(text=f"КД создания промо: {db.get_setting('promo_cd', config.DEFAULT_PROMO_CD)} сек", callback_data="adm_set_promo_cd",
+                                           icon_custom_emoji_id="6032937473162614352")],
             ],
             "adm_main",
         ),
@@ -1358,10 +1402,13 @@ async def adm_panel_target(message: Message, state: FSMContext):
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="➕ Добавить баланс", callback_data=f"ub_add:{user['id']}"),
-                    InlineKeyboardButton(text="🔄 Обнулить", callback_data=f"ub_zero:{user['id']}"),
+                    InlineKeyboardButton(text="Добавить баланс", callback_data=f"ub_add:{user['id']}",
+                                     icon_custom_emoji_id="5775937998948404844"),
+                    InlineKeyboardButton(text="Обнулить", callback_data=f"ub_zero:{user['id']}",
+                                     icon_custom_emoji_id="5879896690210639947"),
                 ],
-                [InlineKeyboardButton(text="💸 Активные выводы", callback_data=f"ub_wd:{user['id']}")],
+                [InlineKeyboardButton(text="Активные выводы", callback_data=f"ub_wd:{user['id']}",
+                                     icon_custom_emoji_id="5967390100357648692")],
             ]
         )
         await message.answer(
@@ -1710,10 +1757,13 @@ async def cmd_userbalance(message: Message, command: CommandObject):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Добавить баланс", callback_data=f"ub_add:{user['id']}"),
-                InlineKeyboardButton(text="🔄 Обнулить", callback_data=f"ub_zero:{user['id']}"),
+                InlineKeyboardButton(text="Добавить баланс", callback_data=f"ub_add:{user['id']}",
+                                     icon_custom_emoji_id="5775937998948404844"),
+                InlineKeyboardButton(text="Обнулить", callback_data=f"ub_zero:{user['id']}",
+                                     icon_custom_emoji_id="5879896690210639947"),
             ],
-            [InlineKeyboardButton(text="💸 Активные выводы", callback_data=f"ub_wd:{user['id']}")],
+            [InlineKeyboardButton(text="Активные выводы", callback_data=f"ub_wd:{user['id']}",
+                                 icon_custom_emoji_id="5967390100357648692")],
         ]
     )
     await message.answer(
@@ -1923,8 +1973,10 @@ async def cmd_withdraw(message: Message, command: CommandObject):
     wd_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"wd_approve:{wd['id']}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"wd_reject:{wd['id']}"),
+                InlineKeyboardButton(text="Выплатить", callback_data=f"wd_approve:{wd['id']}",
+                                     icon_custom_emoji_id="5776375003280838798"),
+                InlineKeyboardButton(text="Отклонить", callback_data=f"wd_reject:{wd['id']}",
+                                     icon_custom_emoji_id="5778527486270770928"),
             ]
         ]
     )
@@ -2211,11 +2263,15 @@ def top_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💰 По балансу", callback_data="top_bal"),
-                InlineKeyboardButton(text="🎰 Победы в рулетке", callback_data="top_roulette"),
+                InlineKeyboardButton(text="По балансу", callback_data="top_bal",
+                                     icon_custom_emoji_id="5811989245761426317"),
+                InlineKeyboardButton(text="Победы в рулетке", callback_data="top_roulette",
+                                     icon_custom_emoji_id="5960608239623082921"),
             ],
-            [InlineKeyboardButton(text="👥 По рефералам", callback_data="top_refs")],
-            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="По рефералам", callback_data="top_refs",
+                                 icon_custom_emoji_id="5942877472163892475")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu",
+                                 icon_custom_emoji_id="5875082500023258804")],
         ]
     )
 
@@ -2288,10 +2344,13 @@ async def cq_task_info(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Перейти в канал", url=f"https://t.me/{task['sponsor']}"),
-                InlineKeyboardButton(text="✅ Проверить подписку", callback_data=f"task_check:{task_id}"),
+                InlineKeyboardButton(text="Перейти в канал", url=f"https://t.me/{task['sponsor']}",
+                                     icon_custom_emoji_id="5877465816030515018"),
+                InlineKeyboardButton(text="Проверить подписку", callback_data=f"task_check:{task_id}",
+                                     icon_custom_emoji_id="5776375003280838798"),
             ],
-            [InlineKeyboardButton(text="↩️ Назад", callback_data="earn_gold")],
+            [InlineKeyboardButton(text="Назад", callback_data="earn_gold",
+                                 icon_custom_emoji_id="5875082500023258804")],
         ]
     )
     await cb.message.edit_text(
@@ -2479,8 +2538,10 @@ async def wd_screenshot(message: Message, state: FSMContext):
     wd_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"wd_approve:{wd_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"wd_reject:{wd_id}"),
+                InlineKeyboardButton(text="Выплатить", callback_data=f"wd_approve:{wd_id}",
+                                     icon_custom_emoji_id="5776375003280838798"),
+                InlineKeyboardButton(text="Отклонить", callback_data=f"wd_reject:{wd_id}",
+                                     icon_custom_emoji_id="5778527486270770928"),
             ]
         ]
     )
@@ -2548,12 +2609,14 @@ async def cq_wd_action(cb: CallbackQuery):
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="💾 Оставить баланс",
+                            text="Оставить баланс",
                             callback_data=f"wd_rejkeep:{wd_id}",
+                            icon_custom_emoji_id="5776375003280838798",
                         ),
                         InlineKeyboardButton(
-                            text="🗑 Обнулить баланс",
+                            text="Обнулить баланс",
                             callback_data=f"wd_rejzero:{wd_id}",
+                            icon_custom_emoji_id="5879896690210639947",
                         ),
                     ]
                 ]
@@ -2618,10 +2681,13 @@ async def cq_promo_menu(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="start_promo"),
-                InlineKeyboardButton(text="🛠 Создать свой промокод", callback_data="create_promo"),
+                InlineKeyboardButton(text="Активировать промокод", callback_data="start_promo",
+                                  icon_custom_emoji_id="6032937473162614352"),
+                InlineKeyboardButton(text="Создать свой промокод", callback_data="create_promo",
+                                  icon_custom_emoji_id="5988023995125993550"),
             ],
-            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu",
+                                 icon_custom_emoji_id="5875082500023258804")],
         ]
     )
     await cb.message.edit_text("🎁 Промокоды. Выберите действие:", reply_markup=kb)
@@ -2702,8 +2768,10 @@ async def cp_uses(message: Message, state: FSMContext):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data="create_promo_ok"),
-                InlineKeyboardButton(text="❌ Отменить", callback_data="create_promo_no"),
+                InlineKeyboardButton(text="Подтвердить", callback_data="create_promo_ok",
+                                     icon_custom_emoji_id="5776375003280838798"),
+                InlineKeyboardButton(text="Отменить", callback_data="create_promo_no",
+                                     icon_custom_emoji_id="5778527486270770928"),
             ],
         ]
     )
@@ -2745,17 +2813,20 @@ async def cq_create_promo_ok(cb: CallbackQuery, state: FSMContext):
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="📤 Отправить промокод юзерам",
+                        text="Отправить промокод юзерам",
                         callback_data=f"promo_send:{data['cp_code']}",
+                        icon_custom_emoji_id="5771695636411847302",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text="📋 Показать для копирования",
+                        text="Показать для копирования",
                         callback_data=f"promo_copy:{data['cp_code']}",
+                        icon_custom_emoji_id="5877316724830768997",
                     )
                 ],
-                [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+                [InlineKeyboardButton(text="В меню", callback_data="back_to_menu",
+                                     icon_custom_emoji_id="5875082500023258804")],
             ]
         )
     await cb.message.answer(
@@ -2774,10 +2845,13 @@ async def cq_create_promo_no(cb: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="start_promo"),
-                InlineKeyboardButton(text="🛠 Создать свой промокод", callback_data="create_promo"),
+                InlineKeyboardButton(text="Активировать промокод", callback_data="start_promo",
+                                  icon_custom_emoji_id="6032937473162614352"),
+                InlineKeyboardButton(text="Создать свой промокод", callback_data="create_promo",
+                                  icon_custom_emoji_id="5988023995125993550"),
             ],
-            [InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu",
+                                 icon_custom_emoji_id="5875082500023258804")],
         ]
     )
     await cb.message.edit_text("🎁 Промокоды. Выберите действие:", reply_markup=kb)
