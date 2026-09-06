@@ -578,10 +578,33 @@ async def _fc_post(path, amount):
 async def cmd_fc(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
-    amount = await _parse_fc_amount(command.args)
+    parts = (command.args or "").split()
+    amount = await _parse_fc_amount(parts[0] if parts else None)
     if amount is None:
-        await message.answer("Использование: /fc <сумма голды>")
+        await message.answer(
+            "Использование: /fc <сумма голды> [юзер]\n"
+            "Без юзера — за счёт бота. С юзером — спишется с его баланса."
+        )
         return
+
+    payer = None
+    if len(parts) > 1:
+        payer = resolve_user(parts[1])
+        if not payer:
+            await message.answer("Пользователь не найден.")
+            return
+        payer_user = db.get_user(payer["id"])
+        if not payer_user or payer_user["balance"] < amount:
+            await message.answer(
+                f"На балансе пользователя {payer['first_name']} недостаточно голды."
+            )
+            return
+        db.add_balance(payer["id"], -amount)
+        cur = db.get_setting("currency", config.CURRENCY)
+        await message.answer(
+            f"💸 Снято {fmt_num(amount)} {cur} с баланса {payer['first_name']} "
+            f"(@{payer['username'] or payer['id']})."
+        )
 
     if message.chat.type == "channel":
         channel = message.chat.id
@@ -598,9 +621,13 @@ async def cmd_fc(message: Message, command: CommandObject):
 
     if await _fc_post(channel, amount):
         cur = db.get_setting("currency", config.CURRENCY)
+        src = (
+            f"за счёт {payer['first_name']}"
+            if payer else "за счёт бота"
+        )
         await message.answer(
-            f"🚀 Фаст-коммент запущен! Первый комментарий под постом получит "
-            f"{fmt_num(amount)} {cur}."
+            f"🚀 Фаст-коммент запущен ({src})! "
+            f"Первый комментарий под постом получит {fmt_num(amount)} {cur}."
         )
     else:
         await message.answer(_FC_LINK_ERROR)
