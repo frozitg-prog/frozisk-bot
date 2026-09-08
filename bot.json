@@ -1,0 +1,6 @@
+{
+  "$schema": "https://core.telegram.org/bots/api",
+  "name": "Moderation Bot",
+  "description": "Бот-модератор для Telegram чатов",
+  "version": "1.0.0"
+}
